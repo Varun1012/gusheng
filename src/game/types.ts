@@ -41,6 +41,8 @@ export interface HistPoint {
   capUsd: number;
   /** Dollar price at the print. Missing on older saves; derived from cap. */
   priceUsd?: number;
+  /** 1–10 within that year of age. Missing on year-end saves and the IPO print. */
+  slot?: number;
 }
 
 export interface LogLine {
@@ -58,8 +60,20 @@ export interface YearPlan {
   headline: string;
   eventId: string | null;
   q: number;
-  /** Choice locked in, or a quiet year already rolled. Slots then play it out. */
+  /** False only while a choice is waiting on the current cell. */
   committed: boolean;
+  /** "cell" prices and events are per slot. Older saves omit this. */
+  slotMode?: "cell";
+  /** Cell about to print while a choice is open, 1–10. */
+  pendingSlot?: number | null;
+  yearOpenUsd?: number;
+  yearOpenCapUsd?: number;
+  /** Latest cell headline. Not a formula. */
+  note?: string;
+  /** Short ticker of this year's cells. */
+  recent?: string[];
+  anchorDone?: boolean;
+  hadChoice?: boolean;
   priceFrom?: number;
   priceTo?: number;
   sharesFrom?: number;

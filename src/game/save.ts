@@ -34,6 +34,7 @@ export function loadSnap(): Snap | null {
     life.purse ??= 0;
     life.salary ??= 0;
     life.slot ??= 0;
+    if (life.plan && life.plan.slotMode !== "cell") life.plan = null;
     if (life.plan && life.plan.committed == null) life.plan.committed = false;
     return snap;
   } catch {

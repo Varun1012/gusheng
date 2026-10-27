@@ -267,14 +267,20 @@ export function LifeGame() {
 
   function act(index: number) {
     if (!life?.plan) return;
-    setLife(acceptChoice(life, index));
+    const step = acceptChoice(life, index);
+    if (step.report) settle(step.life, step.report);
+    else setLife(step.life);
   }
 
   function finishYear() {
     if (!life?.alive || !life.plan) return;
     if (life.plan.eventId && !life.plan.committed) return;
     const step = choose(life, null);
-    settle(step.life, step.report);
+    if (step.report) settle(step.life, step.report);
+    else {
+      setLife(step.life);
+      if (music.sfx && step.life.plan?.eventId && !step.life.plan.committed) blip(true);
+    }
   }
 
   useEffect(() => {
@@ -284,7 +290,10 @@ export function LifeGame() {
       const step = advance(life);
       if (step.life === life) return;
       if (step.report) settle(step.life, step.report);
-      else setLife(step.life);
+      else {
+        setLife(step.life);
+        if (music.sfx && step.life.plan?.eventId && !step.life.plan.committed) blip(true);
+      }
     }, 1000);
     return () => window.clearTimeout(timer);
   }, [ready, phase, quoting, life, music.sfx]);
@@ -351,7 +360,10 @@ export function LifeGame() {
             onResume={() => {
               if (!saved) return;
               unlockAudio();
-              setLife(saved.life);
+              const resumed = saved.life.alive && (!saved.life.plan || saved.life.plan.slotMode !== "cell")
+                ? beginYear({ ...saved.life, plan: null })
+                : saved.life;
+              setLife(resumed);
               setReports(saved.reports ?? []);
               setQuoting(true);
               setPhase(saved.phase);
@@ -612,7 +624,7 @@ function Title({
         <div className="mt-5 max-w-xl space-y-3 text-base leading-relaxed text-muted">
           <p>你可以赤貧，也可以含著金湯匙。目標只有一個：除牌之前，把股價與市值一起做到最大。</p>
           <p>途中的選擇取材自全球市場的牛熊。同一件事，在泡沫、滯脹、海嘯裡，結果可以相反。你能做的，是換上對的人生政策。</p>
-          <p>死亡不由劇情赦免。每年按當地、該曆年、該年齡的死亡率擲一次骰，健康與「健康優先」會改這個數。</p>
+          <p>死亡不由劇情赦免。這一年的死亡率拆進十格裡擲，健康與政策會改這個數。每一格都自己計一次股價。</p>
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <button
@@ -644,7 +656,7 @@ function Title({
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
             <li>六種基本政策隨時可換。效果不寫在按鈕上。</li>
-            <li>一年十格，每秒走一格。沒有抉擇就自己往前報價，遇到選擇才停。</li>
+            <li>一年十格，每秒走一格。每一格都可能出事，也可能要你抉擇；沒有抉擇就繼續報價。除牌圖按每一格的股價來畫。</li>
             <li>出生時個人資金是零。十八歲前父母供養。出來工作後，董事局按表現定薪，再按往後情況調整。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
@@ -830,12 +842,18 @@ function Play({
             <p className="font-mono text-sm text-gold">{life.ticker}</p>
             <h1 className="font-serif text-3xl">{life.name}</h1>
             <p className="text-sm text-muted">
-              {life.age}歲 · {plan.year}年 · 第 {life.slot}/10 格 · {market.name}
+              {life.age}歲 · {plan.year}年 ·{" "}
+              {plan.eventId && !plan.committed && plan.pendingSlot
+                ? `第 ${plan.pendingSlot} 格要抉擇`
+                : `第 ${life.slot}/10 格`}{" "}
+              · {market.name}
             </p>
             <div className="mt-2 flex w-full min-w-48 max-w-xs gap-1" aria-label="本年十格，每秒一格">
-              {Array.from({ length: 10 }, (_, i) => (
-                <div key={i} className={"h-1.5 flex-1 rounded-sm " + (i < life.slot ? "bg-gold" : "bg-line")} />
-              ))}
+              {Array.from({ length: 10 }, (_, i) => {
+                const pending = plan.eventId && !plan.committed ? plan.pendingSlot : null;
+                const cls = i < life.slot ? "bg-gold" : pending === i + 1 ? "bg-gold/40" : "bg-line";
+                return <div key={i} className={"h-1.5 flex-1 rounded-sm " + cls} />;
+              })}
             </div>
           </div>
         </div>
@@ -879,7 +897,7 @@ function Play({
           </div>
           <div className="mt-4">
             <Spark points={life.history} />
-            <p className="text-xs text-muted">曲線是美元市值，轉板不會造成假跳空。</p>
+            <p className="text-xs text-muted">曲線是美元市值，每一格一個點。轉板不會造成假跳空。</p>
           </div>
         </div>
         <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
@@ -891,7 +909,7 @@ function Play({
             {formatQ(plan.q)}
           </p>
           <p className="mt-1 text-xs text-muted">
-            死亡率，不是存活率。推進這一年之後才揭曉擲骰。槓桿 {Math.round(life.leverage * 100)}%。
+            這一年的死亡率，拆開在十格裡擲。槓桿 {Math.round(life.leverage * 100)}%。
           </p>
           <div className="mt-4 space-y-3">
             <Meter label="健康" value={life.health} />
@@ -929,6 +947,15 @@ function Play({
       ) : (
         <div className="rounded-2xl border border-line bg-panel p-5">
           <h2 className="font-serif text-2xl">{quoting ? "報價進行中" : "報價暫停"}</h2>
+          {(plan.recent ?? []).length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {(plan.recent ?? []).map((line, index, all) => (
+                <li key={`${line}-${index}`} className={index === all.length - 1 ? "text-sm text-ivory" : "text-sm text-muted"}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="mt-2 text-sm text-muted">{plan.headline}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -1017,7 +1044,7 @@ function Dead({
       <div className="rounded-2xl border border-line bg-panel p-4 sm:p-5">
         <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
           <h2 className="font-serif text-2xl">股價以年齡</h2>
-          <p className="font-mono text-xs text-muted">美元</p>
+          <p className="font-mono text-xs text-muted">每一格一點 · {life.history.length} 格 · 美元</p>
         </div>
         <PriceAgeChart points={life.history} />
       </div>

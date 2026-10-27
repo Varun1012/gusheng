@@ -6,6 +6,7 @@ interface Print {
   i: number;
   age: number;
   year: number;
+  slot?: number;
   usd: number;
 }
 
@@ -17,7 +18,7 @@ function usdOf(point: HistPoint): number {
 
 function printsOf(points: HistPoint[]): Print[] {
   return points
-    .map((point, i) => ({ i, age: point.age, year: point.year, usd: usdOf(point) }))
+    .map((point, i) => ({ i, age: point.age, year: point.year, slot: point.slot, usd: usdOf(point) }))
     .filter((point) => Number.isFinite(point.usd) && point.usd > 0);
 }
 
@@ -184,7 +185,7 @@ export function PriceAgeChart({ points }: { points: HistPoint[] }) {
                 fontSize="11"
                 fontFamily="IBM Plex Mono, ui-monospace, monospace"
               >
-                {data[index]!.age}
+                {Math.round(data[index]!.age)}
               </text>
             );
           })}
@@ -230,7 +231,7 @@ export function PriceAgeChart({ points }: { points: HistPoint[] }) {
           style={{ left: tipLeft, top: 8 }}
         >
           <p className="font-mono text-xs text-gold">
-            {shown.age}歲 · {shown.year}
+            {Math.floor(shown.age)}歲{shown.slot ? ` · 第${shown.slot}格` : ""} · {shown.year}
           </p>
           <p className="font-mono text-lg leading-tight">USD {formatPrice(shown.usd)}</p>
           <p className={"font-mono text-xs " + (multiple >= 1 ? "text-up" : "text-down")}>
@@ -244,11 +245,11 @@ export function PriceAgeChart({ points }: { points: HistPoint[] }) {
           <dd className="font-mono">USD {formatPrice(first.usd)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted">峰值 · {peak.age}歲</dt>
+          <dt className="text-xs text-muted">峰值 · {Math.floor(peak.age)}歲</dt>
           <dd className="font-mono text-gold">USD {formatPrice(peak.usd)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted">除牌 · {last.age}歲</dt>
+          <dt className="text-xs text-muted">除牌 · {Math.floor(last.age)}歲</dt>
           <dd className="font-mono">USD {formatPrice(last.usd)}</dd>
         </div>
         <div>
