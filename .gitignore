@@ -3,6 +3,7 @@ node_modules
 .grok
 screenshots
 dist
+dist-pages
 .output
 *.log
 .DS_Store
