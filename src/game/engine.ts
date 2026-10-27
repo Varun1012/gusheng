@@ -1,4 +1,4 @@
-import { COUNTRIES, TIER_ORDER, countryById } from "@/game/countries";
+import { TIER_ORDER, countryById, pickCountryByBirth } from "@/game/countries";
 import { eventById, EVENTS } from "@/game/events";
 import { capUsd, priceUsd } from "@/game/format";
 import { mortalityQx, naturalCause } from "@/game/mortality";
@@ -159,7 +159,7 @@ export function createLife(input: BirthInput = {}): Life {
   };
 
   if (!input.countryId) {
-    life.countryId = COUNTRIES[Math.floor(draw(life) * COUNTRIES.length)]!.id;
+    life.countryId = pickCountryByBirth(() => draw(life));
   }
   if (!input.birthYear) {
     life.birthYear = 1930 + Math.floor(draw(life) * 75);
@@ -331,7 +331,7 @@ export function choose(source: Life, index: number | null): { life: Life; report
     life.leverage = clamp(life.leverage + (choice.leverage ?? 0), 0, 0.94);
     if (choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
     title = event.title;
-    detail = `${choice.label}。${choice.detail}`;
+    detail = choice.label;
     const bits = [
       `「${plan.regimeName}」對「${EXPOSURE_NAME[choice.exposure]}」的係數是 ${scalar.toFixed(2)}，股價 ${signed(pricePct)}`,
     ];
@@ -427,7 +427,7 @@ export function choose(source: Life, index: number | null): { life: Life; report
     age: life.age,
     year: plan.year,
     title,
-    detail: `${detail} ${surviveLine}`,
+    detail: surviveLine,
   });
 
   if (died) {

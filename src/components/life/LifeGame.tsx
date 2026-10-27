@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
-  FastForward,
   Globe,
   GraduationCap,
   HeartPulse,
@@ -12,14 +11,13 @@ import {
   ScrollText,
   Shield,
 } from "lucide-react";
-import { COUNTRIES, countryById } from "@/game/countries";
+import { COUNTRIES, birthOdds, countryById } from "@/game/countries";
 import {
   beginYear,
   createLife,
   currentChoices,
   currentEventCopy,
   choose,
-  fastForward,
   previewMortality,
   runBalance,
   setPolicy,
@@ -48,7 +46,7 @@ declare global {
   }
 }
 
-type Phase = "title" | "pick" | "birth" | "play" | "dead" | "board";
+type Phase = "title" | "pick" | "arrive" | "birth" | "play" | "dead" | "board";
 
 const DECADES: { label: string; year: number | null }[] = [
   { label: "隨機年代", year: null },
@@ -180,7 +178,6 @@ function PolicyChip({
         <Icon className="size-4" aria-hidden="true" />
         {policy.name}
       </span>
-      <span className={"mt-0.5 block text-xs " + (active ? "text-ink/80" : "text-muted")}>{policy.blurb}</span>
     </button>
   );
 }
@@ -196,6 +193,7 @@ export function LifeGame() {
   const [returnTo, setReturnTo] = useState<Phase>("title");
   const [showLog, setShowLog] = useState(false);
   const [ready, setReady] = useState(false);
+  const [quoting, setQuoting] = useState(true);
 
   useEffect(() => {
     setBoard(loadBoard());
@@ -216,10 +214,11 @@ export function LifeGame() {
     setLife(created);
     setReports([]);
     setShowLog(false);
-    setPhase("birth");
+    setQuoting(true);
+    setPhase(input.countryId ? "birth" : "arrive");
   }
 
-  function settle(next: Life, nextReports: Report[]) {
+  function settle(next: Life, report: Report) {
     let recorded = next;
     if (!next.alive && !next.recorded) {
       const epi = epitaph(next);
@@ -241,24 +240,25 @@ export function LifeGame() {
       recorded = { ...next, recorded: true };
     }
     setLife(recorded);
-    setReports(nextReports);
+    setReports((prev) => [...prev, report].slice(-6));
     setPhase(recorded.alive ? "play" : "dead");
-    const last = nextReports[nextReports.length - 1];
-    if (sound && last) blip(!last.died && last.pricePct >= 0);
+    if (sound && (report.died || recorded.plan?.eventId)) blip(!report.died && report.pricePct >= 0);
   }
 
   function act(index: number | null) {
     if (!life?.plan) return;
     const step = choose(life, index);
-    settle(step.life, [step.report]);
+    settle(step.life, step.report);
   }
 
-  function skipQuiet() {
-    if (!life) return;
-    const step = fastForward(life);
-    if (step.reports.length === 0) return;
-    settle(step.life, step.reports);
-  }
+  useEffect(() => {
+    if (!ready || phase !== "play" || !quoting || !life?.alive || !life.plan || life.plan.eventId) return;
+    const timer = window.setTimeout(() => {
+      const step = choose(life, null);
+      settle(step.life, step.report);
+    }, 640);
+    return () => window.clearTimeout(timer);
+  }, [ready, phase, quoting, life, sound]);
 
   const market = life ? countryById(life.countryId) : null;
 
@@ -301,6 +301,7 @@ export function LifeGame() {
               if (!saved) return;
               setLife(saved.life);
               setReports(saved.reports ?? []);
+              setQuoting(true);
               setPhase(saved.phase);
             }}
           />
@@ -317,6 +318,10 @@ export function LifeGame() {
               born({ countryId, birthYear: year });
             }}
           />
+        )}
+
+        {phase === "arrive" && life && (
+          <Arrive life={life} onDone={() => setPhase("birth")} />
         )}
 
         {phase === "birth" && life && market && (
@@ -338,8 +343,8 @@ export function LifeGame() {
             onToggleLog={() => setShowLog((v) => !v)}
             onPolicy={(id) => setLife(setPolicy(life, id))}
             onChoose={(index) => act(index)}
-            onYear={() => act(null)}
-            onSkip={skipQuiet}
+            quoting={quoting}
+            onToggleQuote={() => setQuoting((v) => !v)}
           />
         )}
 
@@ -362,6 +367,91 @@ export function LifeGame() {
         {phase === "board" && <Board rows={board} onBack={() => setPhase(returnTo)} />}
       </div>
     </main>
+  );
+}
+
+function Person({ id, className }: { id: string; className?: string }) {
+  return (
+    <img
+      src={`${import.meta.env.BASE_URL}people/${id}.png`}
+      alt=""
+      draggable={false}
+      className={"pixel object-contain " + (className ?? "h-40 w-24")}
+    />
+  );
+}
+
+function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
+  const odds = birthOdds();
+  const steps = 18;
+  const [step, setStep] = useState(0);
+  const [reduce, setReduce] = useState(false);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+
+  useEffect(() => {
+    setReduce(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }, []);
+
+  useEffect(() => {
+    if (reduce || step >= steps) {
+      const timer = window.setTimeout(() => doneRef.current(), reduce ? 700 : 1200);
+      return () => window.clearTimeout(timer);
+    }
+    const delay = step < 11 ? 75 : 70 + (step - 10) * 48;
+    const timer = window.setTimeout(() => setStep((n) => n + 1), delay);
+    return () => window.clearTimeout(timer);
+  }, [reduce, step]);
+
+  const locked = reduce || step >= steps;
+  const shown = locked ? countryById(life.countryId) : COUNTRIES[(step * 5) % COUNTRIES.length]!;
+  const row = odds.find((item) => item.id === shown.id);
+
+  return (
+    <section className="grid gap-6 lg:grid-cols-5">
+      <div className="lg:col-span-3">
+        <p className="text-sm text-gold">投胎</p>
+        <h1 className="mt-2 font-serif text-4xl sm:text-5xl">{locked ? shown.name : "戶籍還沒蓋章"}</h1>
+        <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
+          十二個上市地，按 2024 年粗出生率加權。出生率越高，越容易投到那裡。不是按人口。
+        </p>
+        <div className="mt-6 flex items-end gap-5">
+          <Person id={shown.id} className="h-52 w-32" />
+          <div>
+            <p className="font-serif text-3xl">{shown.name}</p>
+            <p className="mt-1 text-sm text-muted">{shown.exchange}</p>
+            <p className="mt-3 font-mono text-gold">
+              出生率 {row ? row.rate.toFixed(1) : "—"}‰
+            </p>
+            <p className="font-mono text-sm text-ivory">
+              機率 {row ? (row.p * 100).toFixed(1) : "—"}%
+            </p>
+          </div>
+        </div>
+      </div>
+      <ol className="space-y-2 rounded-2xl border border-line bg-panel p-4 lg:col-span-2">
+        {odds
+          .slice()
+          .sort((a, b) => b.p - a.p)
+          .map((item) => {
+            const country = countryById(item.id);
+            const on = item.id === shown.id;
+            const maxP = odds.reduce((max, row) => Math.max(max, row.p), 0.01);
+            return (
+              <li key={item.id} className="flex items-center gap-3">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-line">
+                  <div
+                    className={"h-full " + (on ? "bg-gold" : "bg-muted")}
+                    style={{ width: `${(item.p / maxP) * 100}%` }}
+                  />
+                </div>
+                <span className={"w-16 text-sm " + (on ? "text-gold" : "text-muted")}>{country.name}</span>
+                <span className="w-12 text-right font-mono text-xs text-ivory">{(item.p * 100).toFixed(1)}%</span>
+              </li>
+            );
+          })}
+      </ol>
+    </section>
   );
 }
 
@@ -419,8 +509,8 @@ function Title({
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
-            <li>六種基本政策隨時可換，用來對付不同的經濟時期。</li>
-            <li>抉擇上會寫明曝險。時期係數可以把同一選擇從賺錢變成虧錢。</li>
+            <li>六種基本政策隨時可換。效果不寫在按鈕上。</li>
+            <li>沒有抉擇的年份，報價自己往前走。遇到選擇才停。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
         </div>
@@ -507,9 +597,14 @@ function Birth({
   return (
     <section className="grid gap-4 lg:grid-cols-5">
       <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-3">
-        <p className="text-xs tracking-[0.2em] text-gold">招股書</p>
-        <h1 className="mt-2 font-serif text-4xl">{life.name}</h1>
-        <p className="mt-1 font-mono text-lg text-gold">{life.ticker}</p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs tracking-[0.2em] text-gold">招股書</p>
+            <h1 className="mt-2 font-serif text-4xl">{life.name}</h1>
+            <p className="mt-1 font-mono text-lg text-gold">{life.ticker}</p>
+          </div>
+          <Person id={life.countryId} className="h-40 w-24" />
+        </div>
         <p className="mt-3 text-sm text-muted">
           {market.exchange} · {life.birthYear}年 · {tierLabel(life.tier)}
         </p>
@@ -569,8 +664,8 @@ function Play({
   onToggleLog,
   onPolicy,
   onChoose,
-  onYear,
-  onSkip,
+  quoting,
+  onToggleQuote,
 }: {
   life: Life;
   reports: Report[];
@@ -578,8 +673,8 @@ function Play({
   onToggleLog: () => void;
   onPolicy: (id: PolicyId) => void;
   onChoose: (index: number) => void;
-  onYear: () => void;
-  onSkip: () => void;
+  quoting: boolean;
+  onToggleQuote: () => void;
 }) {
   const market = countryById(life.countryId);
   const plan = life.plan!;
@@ -587,20 +682,19 @@ function Play({
   const choices = currentChoices(life);
   const cap = life.price * life.shares;
   const last = reports[reports.length - 1];
-  const quietRun =
-    reports.length > 1
-      ? reports.reduce((acc, report) => acc * (1 + report.capPct), 1) - 1
-      : null;
 
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="font-mono text-sm text-gold">{life.ticker}</p>
-          <h1 className="font-serif text-2xl">{life.name}</h1>
-          <p className="text-sm text-muted">
-            {life.age}歲 · {plan.year}年 · {market.name}
-          </p>
+        <div className="flex items-end gap-4">
+          <Person id={life.countryId} className="h-24 w-16" />
+          <div>
+            <p className="font-mono text-sm text-gold">{life.ticker}</p>
+            <h1 className="font-serif text-2xl">{life.name}</h1>
+            <p className="text-sm text-muted">
+              {life.age}歲 · {plan.year}年 · {market.name}
+            </p>
+          </div>
         </div>
         <p className="max-w-xl text-sm leading-relaxed text-muted">
           <span className="mr-2 inline-block rounded-full border border-line px-2 py-0.5 text-ivory">{plan.regimeName}</span>
@@ -673,28 +767,21 @@ function Play({
                 <span className="block text-sm font-medium">
                   {index + 1}. {choice.label}
                 </span>
-                <span className="mt-1 block text-xs text-muted">{choice.detail}</span>
               </button>
             ))}
           </div>
         </div>
       ) : (
         <div className="rounded-2xl border border-line bg-panel p-5">
-          <h2 className="font-serif text-2xl">沒有人叫你做決定</h2>
+          <h2 className="font-serif text-2xl">{quoting ? "報價進行中" : "報價暫停"}</h2>
           <p className="mt-2 text-sm text-muted">{plan.headline}</p>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button type="button" onClick={onYear} className="min-h-11 rounded-xl bg-gold px-4 py-3 font-medium text-ink">
-              過這一年
-            </button>
-            <button
-              type="button"
-              onClick={onSkip}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line px-4 py-3"
-            >
-              <FastForward className="size-4" aria-hidden="true" />
-              快進到下一個抉擇
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onToggleQuote}
+            className="mt-4 min-h-11 rounded-xl border border-line px-4 py-3"
+          >
+            {quoting ? "暫停報價" : "繼續報價"}
+          </button>
         </div>
       )}
 
@@ -705,10 +792,6 @@ function Play({
             <span className={"ml-2 font-mono " + tone(last.pricePct)}>股價 {formatPct(last.pricePct)}</span>
             <span className={"ml-2 font-mono " + tone(last.capPct)}>市值 {formatPct(last.capPct)}</span>
           </p>
-          {quietRun !== null && (
-            <p className="text-muted">這段安靜年份，市值合計 {formatPct(quietRun)}。</p>
-          )}
-          <p className="text-muted">{last.explanation}</p>
         </div>
       )}
 
@@ -757,6 +840,9 @@ function Dead({
     <section className="grid gap-4 lg:grid-cols-5">
       <div className="lg:col-span-3">
         <div className="seal text-2xl">除牌</div>
+        <div className="mt-4">
+          <Person id={life.countryId} className="h-36 w-24" />
+        </div>
         <h1 className="mt-6 font-serif text-4xl">{epi.title}</h1>
         <p className="mt-2 text-sm text-gold">
           {epi.grade} · 綜合 {epi.score}

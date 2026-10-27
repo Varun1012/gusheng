@@ -64,6 +64,11 @@
   }
 }
 
+.pixel {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .seal {
     animation: none;

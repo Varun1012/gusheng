@@ -289,3 +289,39 @@ export function countryById(id: string): Country {
   if (!found) throw new Error(`unknown market ${id}`);
   return found;
 }
+
+/**
+ * Crude birth rate per 1,000 people, around 2024.
+ * Random birth among the twelve listings is weighted by this rate, not by population.
+ */
+export const BIRTH_RATE_2024: Record<string, number> = {
+  hk: 4.9,
+  jp: 5.8,
+  sg: 7.4,
+  kr: 4.6,
+  tw: 5.7,
+  gb: 10.0,
+  de: 8.2,
+  us: 10.7,
+  cn: 6.8,
+  br: 12.8,
+  in: 16.2,
+  ng: 34.5,
+};
+
+export function birthOdds(): { id: string; rate: number; p: number }[] {
+  const total = COUNTRIES.reduce((sum, country) => sum + (BIRTH_RATE_2024[country.id] ?? 0), 0);
+  return COUNTRIES.map((country) => {
+    const rate = BIRTH_RATE_2024[country.id] ?? 0;
+    return { id: country.id, rate, p: total > 0 ? rate / total : 0 };
+  });
+}
+
+export function pickCountryByBirth(rng: () => number): string {
+  let r = rng();
+  for (const row of birthOdds()) {
+    r -= row.p;
+    if (r <= 0) return row.id;
+  }
+  return COUNTRIES[COUNTRIES.length - 1]!.id;
+}
