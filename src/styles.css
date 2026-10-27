@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans TC", "PingFang HK", "Microsoft JhengHei", sans-serif;
+  --font-serif: "Noto Serif TC", "Songti TC", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-ink: #101418;
+  --color-panel: #1a2128;
+  --color-panel-2: #232c35;
+  --color-line: #334454;
+  --color-ivory: #f4f0e6;
+  --color-muted: #a8b2bb;
+  --color-gold: #e7c27a;
+  --color-up: #ff5d63;
+  --color-down: #3dbe84;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body {
+    background: var(--color-ink);
+    color: var(--color-ivory);
+    min-height: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-gold) 40%, transparent);
+  }
+}
+
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--color-up);
+  color: var(--color-up);
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: 0.45em;
+  line-height: 1;
+  padding: 0.55rem 0.35rem 0.55rem 0.85em;
+  transform: rotate(-8deg);
+  animation: seal-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes seal-in {
+  from {
+    opacity: 0;
+    transform: rotate(-16deg) scale(1.4);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-8deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seal {
+    animation: none;
+  }
+}
