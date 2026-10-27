@@ -17,6 +17,8 @@ import {
   createLife,
   currentChoices,
   currentEventCopy,
+  acceptChoice,
+  advance,
   choose,
   previewMortality,
   runBalance,
@@ -245,18 +247,27 @@ export function LifeGame() {
     if (sound && (report.died || recorded.plan?.eventId)) blip(!report.died && report.pricePct >= 0);
   }
 
-  function act(index: number | null) {
+  function act(index: number) {
     if (!life?.plan) return;
-    const step = choose(life, index);
+    setLife(acceptChoice(life, index));
+  }
+
+  function finishYear() {
+    if (!life?.alive || !life.plan) return;
+    if (life.plan.eventId && !life.plan.committed) return;
+    const step = choose(life, null);
     settle(step.life, step.report);
   }
 
   useEffect(() => {
-    if (!ready || phase !== "play" || !quoting || !life?.alive || !life.plan || life.plan.eventId) return;
+    if (!ready || phase !== "play" || !quoting || !life?.alive || !life.plan) return;
+    if (life.plan.eventId && !life.plan.committed) return;
     const timer = window.setTimeout(() => {
-      const step = choose(life, null);
-      settle(step.life, step.report);
-    }, 640);
+      const step = advance(life);
+      if (step.life === life) return;
+      if (step.report) settle(step.life, step.report);
+      else setLife(step.life);
+    }, 1000);
     return () => window.clearTimeout(timer);
   }, [ready, phase, quoting, life, sound]);
 
@@ -267,8 +278,10 @@ export function LifeGame() {
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-5 sm:px-6 sm:py-8">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <button type="button" onClick={() => setPhase("title")} className="text-left">
-            <p className="font-serif text-2xl font-semibold tracking-wide text-gold">股生</p>
-            <p className="text-xs tracking-[0.22em] text-muted">BORN LISTED</p>
+            <p className="text-xs tracking-[0.22em] text-gold">股生</p>
+            <p className="font-serif text-2xl font-semibold">
+              {life && phase !== "title" && phase !== "pick" && phase !== "board" ? life.name : "把這一生上市"}
+            </p>
           </button>
           <div className="flex items-center gap-2">
             <button
@@ -345,6 +358,7 @@ export function LifeGame() {
             onChoose={(index) => act(index)}
             quoting={quoting}
             onToggleQuote={() => setQuoting((v) => !v)}
+            onFinishYear={finishYear}
           />
         )}
 
@@ -404,7 +418,7 @@ function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
   }, [reduce, step]);
 
   const locked = reduce || step >= steps;
-  const shown = locked ? countryById(life.countryId) : COUNTRIES[(step * 5) % COUNTRIES.length]!;
+  const shown = locked ? countryById(life.countryId) : COUNTRIES[(step * 3) % COUNTRIES.length]!;
   const row = odds.find((item) => item.id === shown.id);
 
   return (
@@ -413,7 +427,7 @@ function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
         <p className="text-sm text-gold">投胎</p>
         <h1 className="mt-2 font-serif text-4xl sm:text-5xl">{locked ? shown.name : "戶籍還沒蓋章"}</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
-          十二個上市地，按 2024 年粗出生率加權。出生率越高，越容易投到那裡。不是按人口。
+          二十個上市地，按 2024 年粗出生率加權。出生率越高，越容易投到那裡。不是按人口。
         </p>
         <div className="mt-6 flex items-end gap-5">
           <Person id={shown.id} className="h-52 w-32" />
@@ -429,7 +443,7 @@ function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
           </div>
         </div>
       </div>
-      <ol className="space-y-2 rounded-2xl border border-line bg-panel p-4 lg:col-span-2">
+      <ol className="max-h-80 space-y-2 overflow-auto rounded-2xl border border-line bg-panel p-4 lg:col-span-2">
         {odds
           .slice()
           .sort((a, b) => b.p - a.p)
@@ -445,7 +459,7 @@ function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
                     style={{ width: `${(item.p / maxP) * 100}%` }}
                   />
                 </div>
-                <span className={"w-16 text-sm " + (on ? "text-gold" : "text-muted")}>{country.name}</span>
+                <span className={"w-20 text-sm " + (on ? "text-gold" : "text-muted")}>{country.name}</span>
                 <span className="w-12 text-right font-mono text-xs text-ivory">{(item.p * 100).toFixed(1)}%</span>
               </li>
             );
@@ -510,7 +524,8 @@ function Title({
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
             <li>六種基本政策隨時可換。效果不寫在按鈕上。</li>
-            <li>沒有抉擇的年份，報價自己往前走。遇到選擇才停。</li>
+            <li>一年十格，每秒走一格。沒有抉擇就自己往前報價，遇到選擇才停。</li>
+            <li>出生時個人資金是零。十八歲前父母供養。出來工作後，董事局按表現定薪，再按往後情況調整。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
         </div>
@@ -612,6 +627,7 @@ function Birth({
         <p className="mt-3 text-sm text-muted">
           出生那年：{regime.name}。{regime.headline}
         </p>
+        <p className="mt-2 text-sm text-ivory">{life.name} 出生時個人資金是 0。十八歲前由父母供養，董事局要到出來工作才定薪酬。</p>
         <dl className="mt-6 grid grid-cols-2 gap-4">
           <Stat k="開盤價" v={`${formatPrice(life.price)} ${market.ccy}`} />
           <Stat k="開盤市值" v={`${formatCompact(life.price * life.shares)} ${market.ccy}`} />
@@ -666,6 +682,7 @@ function Play({
   onChoose,
   quoting,
   onToggleQuote,
+  onFinishYear,
 }: {
   life: Life;
   reports: Report[];
@@ -675,6 +692,7 @@ function Play({
   onChoose: (index: number) => void;
   quoting: boolean;
   onToggleQuote: () => void;
+  onFinishYear: () => void;
 }) {
   const market = countryById(life.countryId);
   const plan = life.plan!;
@@ -690,10 +708,15 @@ function Play({
           <Person id={life.countryId} className="h-24 w-16" />
           <div>
             <p className="font-mono text-sm text-gold">{life.ticker}</p>
-            <h1 className="font-serif text-2xl">{life.name}</h1>
+            <h1 className="font-serif text-3xl">{life.name}</h1>
             <p className="text-sm text-muted">
-              {life.age}歲 · {plan.year}年 · {market.name}
+              {life.age}歲 · {plan.year}年 · 第 {life.slot}/10 格 · {market.name}
             </p>
+            <div className="mt-2 flex w-full min-w-48 max-w-xs gap-1" aria-label="本年十格，每秒一格">
+              {Array.from({ length: 10 }, (_, i) => (
+                <div key={i} className={"h-1.5 flex-1 rounded-sm " + (i < life.slot ? "bg-gold" : "bg-line")} />
+              ))}
+            </div>
           </div>
         </div>
         <p className="max-w-xl text-sm leading-relaxed text-muted">
@@ -704,7 +727,7 @@ function Play({
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-3">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <div>
               <p className="text-xs text-muted">股價</p>
               <p className="font-mono text-3xl sm:text-4xl">{formatPrice(life.price)}</p>
@@ -719,6 +742,18 @@ function Play({
               <p className="text-xs text-muted">{market.ccy}</p>
               <p className={"mt-1 font-mono text-sm " + tone(capMultiple(life) - 1)}>
                 自上市 {formatMultiple(capMultiple(life))} · USD {formatCompact(capUsd(life))}
+              </p>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
+              <p className="text-xs text-muted">個人資金</p>
+              <p className="font-mono text-3xl sm:text-4xl">{(life.purse ?? 0) > 0 ? formatCompact(life.purse) : "0"}</p>
+              <p className="text-xs text-muted">{market.ccy}</p>
+              <p className="mt-1 text-sm text-muted">
+                {life.age < 18
+                  ? "父母供養，尚未支薪"
+                  : life.salary > 0
+                    ? `年薪 ${formatCompact(life.salary)}`
+                    : "董事局本年議薪"}
               </p>
             </div>
           </div>
@@ -775,13 +810,18 @@ function Play({
         <div className="rounded-2xl border border-line bg-panel p-5">
           <h2 className="font-serif text-2xl">{quoting ? "報價進行中" : "報價暫停"}</h2>
           <p className="mt-2 text-sm text-muted">{plan.headline}</p>
-          <button
-            type="button"
-            onClick={onToggleQuote}
-            className="mt-4 min-h-11 rounded-xl border border-line px-4 py-3"
-          >
-            {quoting ? "暫停報價" : "繼續報價"}
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onToggleQuote}
+              className="min-h-11 rounded-xl border border-line px-4 py-3"
+            >
+              {quoting ? "暫停報價" : "繼續報價"}
+            </button>
+            <button type="button" onClick={onFinishYear} className="min-h-11 rounded-xl border border-line px-4 py-3">
+              本年收市
+            </button>
+          </div>
         </div>
       )}
 
@@ -791,6 +831,7 @@ function Play({
             {last.year} · {last.title}
             <span className={"ml-2 font-mono " + tone(last.pricePct)}>股價 {formatPct(last.pricePct)}</span>
             <span className={"ml-2 font-mono " + tone(last.capPct)}>市值 {formatPct(last.capPct)}</span>
+            {last.payNote ? <span className="ml-2 text-ivory">{last.payNote}</span> : null}
           </p>
         </div>
       )}

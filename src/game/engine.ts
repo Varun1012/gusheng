@@ -148,6 +148,9 @@ export function createLife(input: BirthInput = {}): Life {
     human: 40,
     reputation: 40,
     leverage: 0.1,
+    purse: 0,
+    salary: 0,
+    slot: 0,
     policy: "diversify",
     tier: "middle",
     family: "",
@@ -239,7 +242,9 @@ export function beginYear(life: Life): Life {
     headline: regime.headline,
     eventId,
     q: mortalityQx(next.countryId, next.age, year, next.health, next.policy),
+    committed: false,
   };
+  next.slot = 0;
   next.plan = plan;
   return next;
 }
@@ -274,18 +279,66 @@ const QUIET = [
   "帳本比日記更長",
 ];
 
-export function choose(source: Life, index: number | null): { life: Life; report: Report } {
-  const life = copy(source);
-  if (!life.plan || life.plan.age !== life.age) {
-    throw new Error("year is not planned");
+const TIER_PAY: Record<TierId, number> = {
+  destitute: 3500,
+  poor: 7000,
+  modest: 12000,
+  middle: 20000,
+  affluent: 32000,
+  dynasty: 48000,
+};
+
+/** What the board would pay this year, in local currency. Internal. */
+export function offerSalary(life: Life): number {
+  const country = countryById(life.countryId);
+  const multiple = Math.max(0.25, priceUsd(life) / Math.max(life.ipoPriceUsd, 0.01));
+  const skill = life.human / 100;
+  const name = life.reputation / 100;
+  const body = life.health / 100;
+  const usd =
+    TIER_PAY[life.tier] *
+    (0.45 + skill * 0.9 + name * 0.35 + body * 0.15) *
+    clamp(0.7 + Math.log2(multiple) * 0.18, 0.45, 2.4);
+  return Math.max(0, usd * country.fx);
+}
+
+function reviewPay(life: Life): string | undefined {
+  if (life.age < 18) {
+    life.salary = 0;
+    life.purse = 0;
+    return undefined;
   }
+  const prev = life.salary;
+  const next = offerSalary(life);
+  if (prev <= 0) {
+    life.salary = next;
+    return "董事局按表現通過第一份薪酬";
+  }
+  life.salary = prev * 0.7 + next * 0.3;
+  const change = (life.salary - prev) / prev;
+  if (Math.abs(change) < 0.12) return undefined;
+  return change > 0 ? "董事局上調薪酬" : "董事局削減薪酬";
+}
+
+function yearPurseTarget(life: Life): number {
+  if (life.age < 18) return 0;
+  const cost = life.salary * 0.64;
+  return Math.max(0, life.purse + life.salary - cost);
+}
+
+function blend(from: number, to: number, t: number): number {
+  if (from <= 0 || to <= 0) return from + (to - from) * t;
+  return from * Math.pow(to / from, t);
+}
+
+function commit(life: Life, index: number | null) {
   const plan = life.plan;
+  if (!plan || plan.age !== life.age) throw new Error("year is not planned");
   const event = plan.eventId ? eventById(plan.eventId) : undefined;
   if (event && (index === null || index < 0 || index >= event.choices.length)) {
     throw new Error("choice required");
   }
   const choice = event && index !== null ? event.choices[index] : undefined;
-
   const priceBefore = life.price;
   const capBefore = life.price * life.shares;
   const country = countryById(life.countryId);
@@ -295,10 +348,11 @@ export function choose(source: Life, index: number | null): { life: Life; report
   let sharePct = 0;
   let bust = false;
   let margin = false;
+  let pricePct = 0;
 
   if (choice && event) {
     const scalar = REGIME_SCALAR[plan.regimeId][choice.exposure];
-    let pricePct = choice.price * scalar;
+    pricePct = choice.price * scalar;
     const aligned = policyById(life.policy).exposure === choice.exposure;
     const risky: Exposure[] = ["leverage", "venture", "real"];
     const hedged =
@@ -323,8 +377,6 @@ export function choose(source: Life, index: number | null): { life: Life; report
     }
     pricePct = clamp(pricePct, -0.72, 0.95);
     sharePct = choice.shares ?? 0;
-    life.price = Math.max(0.02 * country.fx, life.price * (1 + pricePct));
-    life.shares = Math.max(1, life.shares * (1 + sharePct));
     life.health = clamp(life.health + (choice.health ?? 0), 0, 100);
     life.human = clamp(life.human + (choice.human ?? 0), 0, 100);
     life.reputation = clamp(life.reputation + (choice.reputation ?? 0), 0, 100);
@@ -356,7 +408,7 @@ export function choose(source: Life, index: number | null): { life: Life; report
       margin = true;
     }
     drift = clamp(drift, -0.42, 0.36);
-    life.price = Math.max(0.02 * country.fx, life.price * (1 + drift));
+    pricePct = drift;
     life.human = clamp(life.human + (life.policy === "human" ? 1.05 : 0.22) - (life.age > 64 ? 0.35 : 0), 0, 100);
     life.health = clamp(
       life.health +
@@ -376,20 +428,48 @@ export function choose(source: Life, index: number | null): { life: Life; report
     sharePct = 0;
   }
 
-  const economicPricePct = life.price / priceBefore - 1;
-  const economicCapPct = (life.price * life.shares) / capBefore - 1;
+  const priceTo = Math.max(0.02 * country.fx, priceBefore * (1 + pricePct));
+  const sharesTo = Math.max(1, life.shares * (1 + sharePct));
+  const economicPricePct = priceTo / priceBefore - 1;
+  const economicCapPct = (priceTo * sharesTo) / capBefore - 1;
+
+  plan.priceFrom = priceBefore;
+  plan.priceTo = priceTo;
+  plan.sharesFrom = life.shares;
+  plan.sharesTo = sharesTo;
+  plan.pricePct = economicPricePct;
+  plan.capPct = economicCapPct;
+  plan.sharePct = sharePct;
+  plan.title = title;
+  plan.detail = detail;
+  plan.explanation = explanation;
 
   let relistedTo: string | undefined;
   if (choice?.relist) {
+    life.price = priceTo;
+    life.shares = sharesTo;
     const target = resolveRelist(life, choice.relist);
     if (target) {
       const fromName = countryById(life.countryId).name;
       applyRelist(life, target);
       relistedTo = target;
       const toName = countryById(target).name;
-      explanation += `已從${fromName}轉板至${toName}。美元市值連續，之後的死亡率改按當地計算。`;
+      plan.explanation += `已從${fromName}轉板至${toName}。美元市值連續，之後的死亡率改按當地計算。`;
+      plan.priceFrom = life.price;
+      plan.priceTo = life.price;
+      plan.sharesFrom = life.shares;
+      plan.sharesTo = life.shares;
+    } else {
+      life.price = priceBefore;
+      life.shares = plan.sharesFrom;
     }
   }
+  plan.relistedTo = relistedTo;
+
+  const payNote = reviewPay(life);
+  plan.payNote = payNote;
+  plan.purseFrom = life.age < 18 ? 0 : life.purse;
+  plan.purseTo = yearPurseTarget(life);
 
   const hazard = choice?.hazard ?? 0;
   const roll = draw(life);
@@ -405,12 +485,37 @@ export function choose(source: Life, index: number | null): { life: Life; report
     died = true;
     cause = naturalCause(life.age, life.countryId, plan.year, draw(life));
   }
+  plan.died = died;
+  plan.cause = cause;
+  plan.roll = roll;
+  plan.committed = true;
+}
 
+function paintSlot(life: Life) {
+  const plan = life.plan;
+  if (!plan?.committed || plan.priceFrom === undefined || plan.priceTo === undefined) return;
+  const t = Math.min(1, life.slot / 10);
+  life.price = t >= 1 ? plan.priceTo : blend(plan.priceFrom, plan.priceTo, t);
+  const sharesFrom = plan.sharesFrom ?? life.shares;
+  const sharesTo = plan.sharesTo ?? life.shares;
+  life.shares = t >= 1 ? sharesTo : blend(sharesFrom, sharesTo, t);
+  const purseFrom = plan.purseFrom ?? 0;
+  const purseTo = plan.purseTo ?? purseFrom;
+  life.purse = t >= 1 ? purseTo : purseFrom + (purseTo - purseFrom) * t;
+}
+
+function closeYear(life: Life): Report {
+  const plan = life.plan!;
+  life.slot = 10;
+  paintSlot(life);
+  life.price = plan.priceTo ?? life.price;
+  life.shares = plan.sharesTo ?? life.shares;
+  life.purse = plan.purseTo ?? life.purse;
+  const died = Boolean(plan.died);
   const usdCap = capUsd(life);
   const usdPx = priceUsd(life);
   if (usdCap > life.peakCapUsd) life.peakCapUsd = usdCap;
   if (usdPx > life.peakPriceUsd) life.peakPriceUsd = usdPx;
-
   life.history.push({
     age: life.age,
     year: plan.year,
@@ -418,48 +523,101 @@ export function choose(source: Life, index: number | null): { life: Life; report
     cap: life.price * life.shares,
     capUsd: usdCap,
   });
-
+  const roll = plan.roll ?? 0;
   const surviveLine = died
     ? `存活檢定失敗。本年死亡率 ${pct(plan.q)}，擲出 ${pct(roll)}。`
     : `存活。本年死亡率 ${pct(plan.q)}，擲出 ${pct(roll)}。`;
-
   life.log.push({
     age: life.age,
     year: plan.year,
-    title,
+    title: plan.title ?? plan.headline,
     detail: surviveLine,
   });
-
+  if (plan.payNote) {
+    life.log.push({
+      age: life.age,
+      year: plan.year,
+      title: plan.payNote,
+      detail: life.age < 18 ? "仍由父母供養。" : `年薪 ${Math.round(life.salary).toLocaleString("zh-HK")} ${countryById(life.countryId).ccy}。`,
+    });
+  }
+  const report: Report = {
+    age: plan.age,
+    year: plan.year,
+    title: plan.title ?? plan.headline,
+    detail: plan.detail ?? "",
+    explanation: `${plan.explanation ?? ""}${surviveLine}`,
+    regimeName: plan.regimeName,
+    headline: plan.headline,
+    pricePct: plan.pricePct ?? 0,
+    capPct: plan.capPct ?? 0,
+    sharePct: plan.sharePct ?? 0,
+    q: plan.q,
+    roll,
+    died,
+    relistedTo: plan.relistedTo,
+    cause: plan.cause,
+    payNote: plan.payNote,
+  };
   if (died) {
     life.alive = false;
-    life.cause = cause;
+    life.cause = plan.cause;
     life.deathYear = plan.year;
     life.plan = null;
   } else {
     life.age += 1;
+    life.slot = 0;
     life.plan = null;
   }
+  return report;
+}
 
-  const report: Report = {
-    age: plan.age,
-    year: plan.year,
-    title,
-    detail,
-    explanation: `${explanation}${surviveLine}`,
-    regimeName: plan.regimeName,
-    headline: plan.headline,
-    pricePct: economicPricePct,
-    capPct: economicCapPct,
-    sharePct,
-    q: plan.q,
-    roll,
-    died,
-    relistedTo,
-    cause,
-  };
+/** Lock a waiting choice without spending a time slot. */
+export function acceptChoice(source: Life, index: number): Life {
+  const life = copy(source);
+  if (!life.alive) return life;
+  if (!life.plan || life.plan.age !== life.age) return beginYear(life);
+  if (life.plan.committed || !life.plan.eventId) return life;
+  commit(life, index);
+  return life;
+}
 
-  const settled = died ? life : beginYear(life);
-  return { life: settled, report };
+/** One tenth of a year. One call per second while the market is open. */
+export function advance(source: Life): { life: Life; report: Report | null } {
+  if (!source.alive) return { life: source, report: null };
+  let life = copy(source);
+  if (!life.plan || life.plan.age !== life.age) life = beginYear(life);
+  const plan = life.plan;
+  if (!plan) return { life, report: null };
+  if (plan.eventId && !plan.committed) return { life: source, report: null };
+  if (!plan.committed) commit(life, null);
+  if ((life.slot ?? 0) >= 10) {
+    const report = closeYear(life);
+    return { life: report.died ? life : beginYear(life), report };
+  }
+  life.slot = (life.slot ?? 0) + 1;
+  paintSlot(life);
+  return { life, report: null };
+}
+
+export function choose(source: Life, index: number | null): { life: Life; report: Report } {
+  let life = copy(source);
+  if (!life.plan || life.plan.age !== life.age) life = beginYear(life);
+  if (life.plan?.eventId && !life.plan.committed) {
+    if (index === null) throw new Error("choice required");
+    commit(life, index);
+  }
+  let report: Report | null = null;
+  for (let i = 0; i < 12; i += 1) {
+    const step = advance(life);
+    life = step.life;
+    if (step.report) {
+      report = step.report;
+      break;
+    }
+  }
+  if (!report) throw new Error("year did not close");
+  return { life, report };
 }
 
 function signed(x: number): string {
@@ -501,12 +659,12 @@ export function fastForward(source: Life): { life: Life; reports: Report[] } {
 }
 
 export function currentChoices(life: Life): ChoiceDef[] {
-  if (!life.plan?.eventId) return [];
+  if (!life.plan?.eventId || life.plan.committed) return [];
   return eventById(life.plan.eventId)?.choices ?? [];
 }
 
 export function currentEventCopy(life: Life): { title: string; body: string } | null {
-  if (!life.plan?.eventId) return null;
+  if (!life.plan?.eventId || life.plan.committed) return null;
   const event = eventById(life.plan.eventId);
   if (!event || !life.plan) return null;
   return {

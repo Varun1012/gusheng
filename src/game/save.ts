@@ -30,6 +30,11 @@ export function loadSnap(): Snap | null {
     if (!raw) return null;
     const snap = JSON.parse(raw) as Snap;
     if (!snap?.life?.ticker || !snap.phase) return null;
+    const life = snap.life;
+    life.purse ??= 0;
+    life.salary ??= 0;
+    life.slot ??= 0;
+    if (life.plan && life.plan.committed == null) life.plan.committed = false;
     return snap;
   } catch {
     return null;

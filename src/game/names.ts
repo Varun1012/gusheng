@@ -19,6 +19,14 @@ const BR = ["Marina Silva", "Lucas Ferreira", "Beatriz Souza", "Gabriel Costa", 
 const DE = ["Lena Hoffmann", "Jonas Weber", "Mia Schneider", "Felix Becker", "Hannah Kruger", "Paul Fischer"];
 const GB = ["Oliver Clarke", "Amelia Wright", "Harry Bennett", "Sophie Turner", "George Hall", "Isla Morgan"];
 const US = ["Maya Chen", "James Porter", "Elena Vasquez", "Noah Williams", "Aisha Rahman", "Daniel Cho", "Grace Miller", "Leo Andersen"];
+const FR = ["Camille Laurent", "Lucas Bernard", "Chloé Moreau", "Hugo Petit", "Léa Dubois", "Adam Roux"];
+const IT = ["Giulia Rossi", "Marco Bianchi", "Francesca Romano", "Luca Ferrari", "Chiara Greco", "Andrea Conti"];
+const CA = ["Noah Tremblay", "Olivia Martin", "Liam Singh", "Emma Gagnon", "Ethan Brown", "Sofia Chen"];
+const AU = ["Jack Wilson", "Chloe Harris", "Liam Nguyen", "Mia Thompson", "Oliver Kelly", "Zoe Campbell"];
+const IDN = ["Siti Rahmawati", "Budi Santoso", "Dewi Lestari", "Agus Wijaya", "Putri Anggraini", "Rizky Pratama"];
+const MX = ["Sofía Hernández", "Diego Ramírez", "Valentina García", "Mateo López", "Camila Torres", "Santiago Cruz"];
+const PH = ["Maria Santos", "Jose Reyes", "Angel Cruz", "Patricia Garcia", "Miguel Flores", "Liza Mendoza"];
+const EG = ["Omar Hassan", "Fatima Ali", "Yusuf Mahmoud", "Nour Ibrahim", "Layla Farouk", "Karim Adel"];
 
 export function personName(countryId: string, rng: () => number): string {
   if (countryId === "jp") return pick(rng, JP_SUR) + pick(rng, JP_GIVEN);
@@ -29,6 +37,14 @@ export function personName(countryId: string, rng: () => number): string {
   if (countryId === "de") return pick(rng, DE);
   if (countryId === "gb") return pick(rng, GB);
   if (countryId === "us") return pick(rng, US);
+  if (countryId === "fr") return pick(rng, FR);
+  if (countryId === "it") return pick(rng, IT);
+  if (countryId === "ca") return pick(rng, CA);
+  if (countryId === "au") return pick(rng, AU);
+  if (countryId === "id") return pick(rng, IDN);
+  if (countryId === "mx") return pick(rng, MX);
+  if (countryId === "ph") return pick(rng, PH);
+  if (countryId === "eg") return pick(rng, EG);
   return pick(rng, CN_SUR) + pick(rng, CN_GIVEN);
 }
 

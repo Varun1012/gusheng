@@ -56,6 +56,25 @@ export interface YearPlan {
   headline: string;
   eventId: string | null;
   q: number;
+  /** Choice locked in, or a quiet year already rolled. Slots then play it out. */
+  committed: boolean;
+  priceFrom?: number;
+  priceTo?: number;
+  sharesFrom?: number;
+  sharesTo?: number;
+  purseFrom?: number;
+  purseTo?: number;
+  title?: string;
+  detail?: string;
+  explanation?: string;
+  sharePct?: number;
+  pricePct?: number;
+  capPct?: number;
+  died?: boolean;
+  cause?: string;
+  roll?: number;
+  relistedTo?: string;
+  payNote?: string;
 }
 
 export interface BirthInput {
@@ -87,6 +106,12 @@ export interface Life {
   human: number;
   reputation: number;
   leverage: number;
+  /** Personal cash in local currency. Born at 0. */
+  purse: number;
+  /** Annual pay in local currency. 0 until the board sets it at 18. */
+  salary: number;
+  /** Tenth of the current year already played, 0–10. */
+  slot: number;
   policy: PolicyId;
   tier: TierId;
   family: string;
@@ -116,4 +141,6 @@ export interface Report {
   died: boolean;
   relistedTo?: string;
   cause?: string;
+  /** Outcome only: the board set or changed pay. No formula. */
+  payNote?: string;
 }
