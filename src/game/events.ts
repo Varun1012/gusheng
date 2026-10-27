@@ -1,4 +1,5 @@
 import type { ChoiceDef, GameEvent } from "@/game/event-types";
+import { PERSONAL_EVENTS } from "@/game/personal-events";
 
 export type { ChoiceDef, GameEvent };
 
@@ -1044,45 +1045,48 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: "war_years",
-    minAge: 18,
-    maxAge: 40,
-    weight: 3,
-    when: (life) => {
-      const year = life.birthYear + life.age;
-      return (
-        (year >= 1937 && year <= 1945 && ["cn", "jp", "hk", "tw", "kr", "gb", "de"].includes(life.countryId)) ||
-        (year >= 1941 && year <= 1945 && life.countryId === "us")
-      );
-    },
-    title: "戰爭改寫了交易所",
-    body: "{year}年，{headline}。年輕的身體被視為一種庫存。",
+    repeat: true,
+    cooldown: 22,
+    minAge: 16,
+    maxAge: 45,
+    regimes: ["crisis"],
+    weight: 0.45,
+    facet: "social",
+    title: "街上的秩序鬆了",
+    body: "外面不安穩。這不是照著哪一年的頭條排的，是你得決定這具身體還要不要留在這裡。",
     choices: [
       {
-        label: "離開前線，設法轉移",
+        label: "設法離開這座城",
         detail: "不是每個人都走得成",
         exposure: "diversify",
         price: 0.08,
         health: 2,
+        mind: -4,
+        social: -6,
         relist: "safer",
         hazard: 0.01,
-        cause: "戰亂",
+        cause: "動盪",
       },
       {
-        label: "留在戰時經濟裡做事",
-        detail: "工資有，危險也有",
+        label: "留下，繼續做事",
+        detail: "收入還在，心不安",
         exposure: "career",
-        price: 0.12,
+        price: 0.1,
         reputation: 2,
-        hazard: 0.02,
-        cause: "戰亂",
+        mind: -6,
+        kin: 3,
+        hazard: 0.015,
+        cause: "動盪",
       },
       {
-        label: "把僅有的現金換成實物",
-        detail: "糧食與藥比紙幣誠實",
+        label: "把僅有的現金換成吃的和藥",
+        detail: "先顧今天",
         exposure: "real",
-        price: 0.1,
+        price: 0.08,
         health: 3,
-        leverage: -0.05,
+        mind: 2,
+        spendUsd: 180,
+        leverage: -0.04,
       },
     ],
   },
@@ -1598,6 +1602,7 @@ export const EVENTS: GameEvent[] = [
       },
     ],
   },
+  ...PERSONAL_EVENTS,
 ];
 
 export function eventById(id: string): GameEvent | undefined {

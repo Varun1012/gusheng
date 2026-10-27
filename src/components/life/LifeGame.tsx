@@ -91,6 +91,15 @@ function tone(n: number): string {
   return "text-muted";
 }
 
+const FACET_NAME: Record<string, string> = {
+  mind: "心理",
+  body: "身體",
+  kin: "家庭",
+  social: "社會",
+  money: "開支",
+  work: "生計",
+};
+
 function Spark({ points }: { points: HistPoint[] }) {
   if (points.length < 2) {
     return <div className="flex h-28 items-center text-sm text-muted">上市第一筆報價，曲線還沒有長度。</div>;
@@ -623,7 +632,7 @@ function Title({
         </h1>
         <div className="mt-5 max-w-xl space-y-3 text-base leading-relaxed text-muted">
           <p>你可以赤貧，也可以含著金湯匙。目標只有一個：除牌之前，把股價與市值一起做到最大。</p>
-          <p>途中的選擇取材自全球市場的牛熊。同一件事，在泡沫、滯脹、海嘯裡，結果可以相反。你能做的，是換上對的人生政策。</p>
+          <p>臨到你身上的，是心理、身體、家庭和社會，還有個人資金怎麼花。市場冷暖只是背景，取材自歷史，不跟某一年的新聞對時。</p>
           <p>死亡不由劇情赦免。這一年的死亡率拆進十格裡擲，健康與政策會改這個數。每一格都自己計一次股價。</p>
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -656,8 +665,9 @@ function Title({
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
             <li>六種基本政策隨時可換。效果不寫在按鈕上。</li>
-            <li>一年十格，每秒走一格。每一格都可能出事，也可能要你抉擇；沒有抉擇就繼續報價。除牌圖按每一格的股價來畫。</li>
-            <li>出生時個人資金是零。十八歲前父母供養。出來工作後，董事局按表現定薪，再按往後情況調整。</li>
+            <li>一年十格，每秒走一格。任何一格都可能要你抉擇，沒有排好的題號。沒有抉擇就繼續報價。</li>
+            <li>市場的冷暖取材自歷史，只作背景，不跟某一年的新聞對時。臨到身上的是這個人的心理、身體、家庭和社會。</li>
+            <li>出生時個人資金是零。父母會養，但不必等到十八歲：童工、兼職的錢進個人資金，看病、吃飯、人情從這裡出。十八歲董事局才定正式薪酬。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
         </div>
@@ -759,7 +769,9 @@ function Birth({
         <p className="mt-3 text-sm text-muted">
           出生那年：{regime.name}。{regime.headline}
         </p>
-        <p className="mt-2 text-sm text-ivory">{life.name} 出生時個人資金是 0。十八歲前由父母供養，董事局要到出來工作才定薪酬。</p>
+        <p className="mt-2 text-sm text-ivory">
+          {life.name} 出生時個人資金是 0。父母會養，但錢可以自己花，也可以更早去打零工。董事局要到十八歲才定正式薪酬。
+        </p>
         <dl className="mt-6 grid grid-cols-2 gap-4">
           <Stat k="開盤價" v={`${formatPrice(life.price)} ${market.ccy}`} />
           <Stat k="開盤市值" v={`${formatCompact(life.price * life.shares)} ${market.ccy}`} />
@@ -782,9 +794,10 @@ function Birth({
             死亡率依{market.name}、{life.birthYear}年、0歲估算。越早的年份越高。進入市場後才擲骰。
           </p>
           <div className="mt-4 space-y-3">
+            <Meter label="心理" value={life.mind ?? 50} />
             <Meter label="健康" value={life.health} />
-            <Meter label="人力" value={life.human} />
-            <Meter label="名聲" value={life.reputation} />
+            <Meter label="家庭" value={life.kin ?? 50} />
+            <Meter label="社會" value={life.social ?? 50} />
           </div>
         </div>
         <div>
@@ -888,10 +901,14 @@ function Play({
               <p className="text-xs text-muted">{market.ccy}</p>
               <p className="mt-1 text-sm text-muted">
                 {life.age < 18
-                  ? "父母供養，尚未支薪"
+                  ? life.side > 0
+                    ? "零工收入。日常開支從個人資金出"
+                    : "父母供養為主。資金可自己花，也可以去打零工"
                   : life.salary > 0
-                    ? `年薪 ${formatCompact(life.salary)}`
-                    : "董事局本年議薪"}
+                    ? `年薪 ${formatCompact(life.salary)}${life.side > 0 ? " · 另有零工" : ""}`
+                    : life.side > 0
+                      ? "尚未有正式薪酬，零工仍算收入"
+                      : "董事局本年議薪"}
               </p>
             </div>
           </div>
@@ -912,9 +929,10 @@ function Play({
             這一年的死亡率，拆開在十格裡擲。槓桿 {Math.round(life.leverage * 100)}%。
           </p>
           <div className="mt-4 space-y-3">
+            <Meter label="心理" value={life.mind ?? 50} />
             <Meter label="健康" value={life.health} />
-            <Meter label="人力" value={life.human} />
-            <Meter label="名聲" value={life.reputation} />
+            <Meter label="家庭" value={life.kin ?? 50} />
+            <Meter label="社會" value={life.social ?? 50} />
           </div>
         </div>
       </div>
@@ -926,7 +944,9 @@ function Play({
 
       {event ? (
         <div className="rounded-2xl border border-gold/50 bg-panel p-5">
-          <p className="text-xs text-gold">抉擇 · {life.age}歲</p>
+          <p className="text-xs text-gold">
+            {(event.facet && FACET_NAME[event.facet]) || "抉擇"} · {life.age}歲 · 這一刻
+          </p>
           <h2 className="mt-1 font-serif text-2xl">{event.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{event.body}</p>
           <div className="mt-4 grid gap-2">

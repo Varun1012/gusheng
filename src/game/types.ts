@@ -122,10 +122,20 @@ export interface Life {
   human: number;
   reputation: number;
   leverage: number;
-  /** Personal cash in local currency. Born at 0. */
+  /** Personal cash in local currency. Born at 0. Spendable at any age. */
   purse: number;
-  /** Annual pay in local currency. 0 until the board sets it at 18. */
+  /** Formal annual pay in local currency. The board sets this from 18. */
   salary: number;
+  /** Side income in local currency: child work, part-time, gigs. Any age. */
+  side: number;
+  /** Mood. */
+  mind: number;
+  /** Family bond. */
+  kin: number;
+  /** Social belonging. */
+  social: number;
+  /** Year a repeatable question last appeared. */
+  cool: Record<string, number>;
   /** Tenth of the current year already played, 0–10. */
   slot: number;
   policy: PolicyId;

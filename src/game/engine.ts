@@ -20,17 +20,6 @@ const TIER_STATS: Record<
   dynasty: { cap: [10000000, 42000000], px: [48, 110], health: 86, human: 76, rep: 80, policy: "venture" },
 };
 
-const STAGE_P: Record<Stage, number> = {
-  infant: 0.72,
-  child: 0.48,
-  teen: 0.62,
-  youth: 0.74,
-  prime: 0.7,
-  mid: 0.66,
-  late: 0.52,
-  elder: 0.48,
-};
-
 export function stageOf(age: number): Stage {
   if (age < 6) return "infant";
   if (age < 13) return "child";
@@ -81,6 +70,7 @@ function copy(life: Life): Life {
     log: [...life.log],
     origin: { ...life.origin },
     plan: life.plan ? { ...life.plan, recent: life.plan.recent ? [...life.plan.recent] : undefined } : null,
+    cool: { ...(life.cool ?? {}) },
   };
 }
 
@@ -99,7 +89,13 @@ function fill(template: string, life: Life, regimeName: string, headline: string
 }
 
 function eligible(event: (typeof EVENTS)[number], life: Life, regimeId: RegimeId): boolean {
-  if (life.used.includes(event.id)) return false;
+  if (!event.repeat && life.used.includes(event.id)) return false;
+  if (event.anchorAge !== undefined && event.anchorAge !== life.age) return false;
+  if (event.repeat) {
+    const last = life.cool?.[event.id];
+    const gap = event.cooldown ?? 5;
+    if (last !== undefined && life.birthYear + life.age - last < gap) return false;
+  }
   if (event.countries && !event.countries.includes(life.countryId)) return false;
   if (event.minAge !== undefined && life.age < event.minAge) return false;
   if (event.maxAge !== undefined && life.age > event.maxAge) return false;
@@ -107,16 +103,6 @@ function eligible(event: (typeof EVENTS)[number], life: Life, regimeId: RegimeId
   if (event.regimes && !event.regimes.includes(regimeId)) return false;
   if (event.when && !event.when(life)) return false;
   return true;
-}
-
-function weighted<T extends { weight?: number }>(items: T[], life: Life): T {
-  const total = items.reduce((sum, item) => sum + (item.weight ?? 1), 0);
-  let r = draw(life) * total;
-  for (const item of items) {
-    r -= item.weight ?? 1;
-    if (r <= 0) return item;
-  }
-  return items[items.length - 1]!;
 }
 
 export function previewMortality(life: Life): number {
@@ -150,6 +136,11 @@ export function createLife(input: BirthInput = {}): Life {
     leverage: 0.1,
     purse: 0,
     salary: 0,
+    side: 0,
+    mind: 50,
+    kin: 50,
+    social: 50,
+    cool: {},
     slot: 0,
     policy: "diversify",
     tier: "middle",
@@ -196,6 +187,19 @@ export function createLife(input: BirthInput = {}): Life {
   life.health = clamp(stats.health + (draw(life) - 0.5) * 12, 20, 96);
   life.human = clamp(stats.human + (draw(life) - 0.5) * 12, 8, 96);
   life.reputation = clamp(stats.rep + (draw(life) - 0.5) * 12, 8, 96);
+  const mood = {
+    destitute: { mind: 44, kin: 46, social: 30 },
+    poor: { mind: 48, kin: 52, social: 36 },
+    modest: { mind: 52, kin: 58, social: 44 },
+    middle: { mind: 55, kin: 60, social: 50 },
+    affluent: { mind: 58, kin: 66, social: 60 },
+    dynasty: { mind: 60, kin: 74, social: 68 },
+  }[tier];
+  life.mind = clamp(mood.mind + (draw(life) - 0.5) * 16, 12, 92);
+  life.kin = clamp(mood.kin + (draw(life) - 0.5) * 14, 12, 92);
+  life.social = clamp(mood.social + (draw(life) - 0.5) * 14, 8, 92);
+  life.side = 0;
+  life.cool = {};
   life.leverage = clamp(0.04 + draw(life) * 0.08, 0, 0.3);
   life.policy = stats.policy;
   life.name = personName(life.countryId, () => draw(life));
@@ -219,25 +223,43 @@ export function createLife(input: BirthInput = {}): Life {
   return life;
 }
 
+function slotChance(life: Life): number {
+  let chance = 0.46;
+  if (life.mind < 42) chance += 0.06;
+  if (life.health < 48) chance += 0.05;
+  if (life.kin < 42) chance += 0.05;
+  if (life.social < 42) chance += 0.04;
+  return Math.min(0.68, chance);
+}
+
+function tunedWeight(event: (typeof EVENTS)[number], life: Life): number {
+  let weight = event.weight ?? 1;
+  if (event.anchorAge === life.age) weight *= 4;
+  const facet = event.facet;
+  if (facet === "mind") weight *= life.mind < 45 ? 2.4 : life.mind > 75 ? 0.75 : 1;
+  if (facet === "body") weight *= life.health < 50 ? 2.3 : 1;
+  if (facet === "kin") weight *= life.kin < 48 ? 2.2 : 1.1;
+  if (facet === "social") weight *= life.social < 45 ? 2.2 : 1.05;
+  if (facet === "money") weight *= 1.2;
+  if (facet === "work" && life.age < 18) weight *= 1.8;
+  if (facet === "work" && life.age >= 16 && life.age < 28) weight *= 1.25;
+  return weight;
+}
+
 function pickSlotEvent(life: Life): string | null {
   const plan = life.plan;
   if (!plan) return null;
-  const regimeId = plan.regimeId;
-  if (!plan.anchorDone) {
-    const anchors = EVENTS.filter((event) => event.anchorAge === life.age && eligible(event, life, regimeId));
-    if (anchors.length === 0) {
-      plan.anchorDone = true;
-    } else if (draw(life) < ((life.slot ?? 0) === 0 ? 0.9 : 0.6)) {
-      plan.anchorDone = true;
-      return weighted(anchors, life).id;
-    }
-  }
-  const yearly = STAGE_P[stageOf(life.age)];
-  const chance = 1 - Math.pow(1 - yearly, 0.1);
-  if (draw(life) > chance) return null;
-  const pool = EVENTS.filter((event) => event.anchorAge === undefined && eligible(event, life, regimeId));
+  if (draw(life) > slotChance(life)) return null;
+  const pool = EVENTS.filter((event) => eligible(event, life, plan.regimeId));
   if (pool.length === 0) return null;
-  return weighted(pool, life).id;
+  const weights = pool.map((event) => ({ event, weight: tunedWeight(event, life) }));
+  const total = weights.reduce((sum, item) => sum + item.weight, 0);
+  let roll = draw(life) * total;
+  for (const item of weights) {
+    roll -= item.weight;
+    if (roll <= 0) return item.event.id;
+  }
+  return weights[weights.length - 1]!.event.id;
 }
 
 export function beginYear(life: Life): Life {
@@ -287,8 +309,12 @@ function applyRelist(life: Life, targetId: string) {
   const from = countryById(life.countryId);
   const to = countryById(targetId);
   const usd = (life.price * life.shares) / from.fx;
+  const purseUsd = (life.purse ?? 0) / from.fx;
+  const sideUsd = (life.side ?? 0) / from.fx;
   life.countryId = targetId;
   life.price = (usd / life.shares) * to.fx;
+  life.purse = purseUsd * to.fx;
+  life.side = sideUsd * to.fx;
   life.ticker = reticker(life.ticker, targetId);
 }
 
@@ -308,9 +334,11 @@ export function offerSalary(life: Life): number {
   const skill = life.human / 100;
   const name = life.reputation / 100;
   const body = life.health / 100;
+  const mood = (life.mind ?? 50) / 100;
+  const bond = (life.social ?? 50) / 100;
   const usd =
     TIER_PAY[life.tier] *
-    (0.45 + skill * 0.9 + name * 0.35 + body * 0.15) *
+    (0.4 + skill * 0.75 + name * 0.25 + body * 0.12 + mood * 0.16 + bond * 0.1) *
     clamp(0.7 + Math.log2(multiple) * 0.18, 0.45, 2.4);
   return Math.max(0, usd * country.fx);
 }
@@ -318,7 +346,6 @@ export function offerSalary(life: Life): number {
 function reviewPay(life: Life): string | undefined {
   if (life.age < 18) {
     life.salary = 0;
-    life.purse = 0;
     return undefined;
   }
   const prev = life.salary;
@@ -376,11 +403,15 @@ function pushPrint(life: Life) {
 }
 
 function accrueSlot(life: Life) {
-  if (life.age < 18) {
-    life.purse = 0;
-    return;
+  const parentCover = life.age < 18 && life.salary <= 0 && life.side <= 0;
+  if (parentCover) return;
+  const inflow = (life.salary + life.side) / 10;
+  const living = life.age < 18 ? life.side * 0.035 : life.salary * 0.064 + life.side * 0.04;
+  life.purse = Math.max(0, life.purse + inflow - living);
+  if (life.age >= 18 && life.salary <= 0 && life.side <= 0 && life.purse > 0) {
+    const fx = countryById(life.countryId).fx;
+    life.purse = Math.max(0, life.purse - (80 * fx) / 10);
   }
-  life.purse = Math.max(0, life.purse + life.salary * 0.036);
 }
 
 function slotDrift(life: Life): number {
@@ -390,7 +421,9 @@ function slotDrift(life: Life): number {
   const prod = ageProductivity(life.age);
   const humanF = 0.62 + (life.human / 100) * 0.7;
   const healthF = life.health < 25 ? 0.55 : 0.78 + (life.health / 100) * 0.3;
-  drift *= prod * humanF * healthF * country.growth;
+  const mindF = life.mind < 28 ? 0.72 : 0.88 + (life.mind / 100) * 0.2;
+  const kinF = life.kin < 25 ? 0.9 : 1;
+  drift *= prod * humanF * healthF * mindF * kinF * country.growth;
   drift *= 1 + life.leverage * (life.policy === "leverage" ? 0.85 : 0.3);
   drift += (gauss(life) * 0.03 * POLICY_VOL[life.policy] * country.vol) / Math.sqrt(10);
   if (life.leverage > 0.72 && drift < 0 && (plan.regimeId === "crisis" || plan.regimeId === "tightening")) {
@@ -520,6 +553,9 @@ function applyChoice(life: Life, index: number): Report | null {
   life.health = clamp(life.health + (choice.health ?? 0), 0, 100);
   life.human = clamp(life.human + (choice.human ?? 0), 0, 100);
   life.reputation = clamp(life.reputation + (choice.reputation ?? 0), 0, 100);
+  life.mind = clamp(life.mind + (choice.mind ?? 0), 0, 100);
+  life.kin = clamp(life.kin + (choice.kin ?? 0), 0, 100);
+  life.social = clamp(life.social + (choice.social ?? 0), 0, 100);
   life.leverage = clamp(life.leverage + (choice.leverage ?? 0), 0, 0.94);
   if (choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
   movePrice(life, pricePct, sharePct);
@@ -536,7 +572,8 @@ function applyChoice(life: Life, index: number): Report | null {
   plan.title = event.title;
   plan.detail = choice.label;
   plan.hadChoice = true;
-  life.used.push(event.id);
+  if (event.repeat) life.cool = { ...(life.cool ?? {}), [event.id]: plan.year };
+  else if (!life.used.includes(event.id)) life.used.push(event.id);
   if (choice.relist) {
     const target = resolveRelist(life, choice.relist);
     if (target) {
@@ -546,8 +583,22 @@ function applyChoice(life: Life, index: number): Report | null {
       plan.explanation += `已從${fromName}轉板至${countryById(target).name}。美元股價連續，之後的死亡率改按當地計算。`;
     }
   }
+  if (choice.sideUsd !== undefined) {
+    life.side = Math.max(0, choice.sideUsd * countryById(life.countryId).fx);
+  }
   life.slot = plan.pendingSlot ?? (life.slot ?? 0) + 1;
   accrueSlot(life);
+  const fx = countryById(life.countryId).fx;
+  if (choice.gainUsd) life.purse += choice.gainUsd * fx;
+  if (choice.spendUsd && choice.spendUsd > 0) {
+    const cost = choice.spendUsd * fx;
+    if (life.purse >= cost) life.purse -= cost;
+    else {
+      life.purse = 0;
+      life.kin = clamp(life.kin - 4, 0, 100);
+      life.mind = clamp(life.mind - 3, 0, 100);
+    }
+  }
   plan.eventId = null;
   plan.committed = true;
   plan.pendingSlot = null;
@@ -583,6 +634,17 @@ function ageAYear(life: Life) {
   }
   const target = life.policy === "cash" ? 0.06 : life.policy === "leverage" ? 0.58 : life.policy === "venture" ? 0.34 : 0.16;
   life.leverage = clamp(life.leverage + (target - life.leverage) * 0.18, 0, 0.94);
+  life.side = Math.max(0, life.side * 0.9);
+  life.mind = clamp(
+    life.mind + (life.health - 60) * 0.04 + (life.kin - 55) * 0.035 + (life.social - 55) * 0.03 - (life.mind - 58) * 0.05,
+    0,
+    100,
+  );
+  if (life.mind < 35) life.health = clamp(life.health - 0.45, 0, 100);
+  if (life.kin > 70 && life.health < 70) life.health = clamp(life.health + 0.2, 0, 100);
+  if (life.social < 30) life.reputation = clamp(life.reputation - 0.2, 0, 100);
+  life.kin = clamp(life.kin - (life.kin - 58) * 0.03, 0, 100);
+  life.social = clamp(life.social - (life.social - 52) * 0.03, 0, 100);
 }
 
 function closeYear(life: Life): Report {
@@ -710,13 +772,14 @@ export function currentChoices(life: Life): ChoiceDef[] {
   return eventById(life.plan.eventId)?.choices ?? [];
 }
 
-export function currentEventCopy(life: Life): { title: string; body: string } | null {
+export function currentEventCopy(life: Life): { title: string; body: string; facet: string | null } | null {
   if (!life.plan?.eventId || life.plan.committed) return null;
   const event = eventById(life.plan.eventId);
   if (!event || !life.plan) return null;
   return {
     title: fill(event.title, life, life.plan.regimeName, life.plan.headline),
     body: fill(event.body, life, life.plan.regimeName, life.plan.headline),
+    facet: event.facet ?? null,
   };
 }
 

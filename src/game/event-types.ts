@@ -1,5 +1,7 @@
 import type { Exposure, Flags, Life, RegimeId, Stage } from "@/game/types";
 
+export type Facet = "mind" | "body" | "kin" | "social" | "money" | "work";
+
 export interface ChoiceDef {
   label: string;
   detail: string;
@@ -11,6 +13,18 @@ export interface ChoiceDef {
   human?: number;
   reputation?: number;
   leverage?: number;
+  /** Mood. Linked to body, family and social life. */
+  mind?: number;
+  /** Family bond. */
+  kin?: number;
+  /** Belonging outside the family. */
+  social?: number;
+  /** Personal cash spent, in USD, converted to local. A shortfall strains kin and mind. */
+  spendUsd?: number;
+  /** Cash received into personal funds, in USD. */
+  gainUsd?: number;
+  /** Sets yearly side income (child work, part-time), in USD. 0 quits it. */
+  sideUsd?: number;
   hazard?: number;
   cause?: string;
   relist?: string | "safer" | "richer";
@@ -31,5 +45,11 @@ export interface GameEvent {
   minAge?: number;
   maxAge?: number;
   weight?: number;
+  /** Life thread this question pulls on. */
+  facet?: Facet;
+  /** Can return in a later year. Otherwise once per life. */
+  repeat?: boolean;
+  /** Years before a repeatable question can return. */
+  cooldown?: number;
   when?: (life: Life) => boolean;
 }

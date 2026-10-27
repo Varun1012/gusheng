@@ -33,6 +33,11 @@ export function loadSnap(): Snap | null {
     const life = snap.life;
     life.purse ??= 0;
     life.salary ??= 0;
+    life.side ??= 0;
+    life.mind ??= 50;
+    life.kin ??= 55;
+    life.social ??= 45;
+    life.cool ??= {};
     life.slot ??= 0;
     if (life.plan && life.plan.slotMode !== "cell") life.plan = null;
     if (life.plan && life.plan.committed == null) life.plan.committed = false;

@@ -303,6 +303,17 @@ const FUTURE: { id: RegimeId; headline: string }[] = [
   { id: "recovery", headline: "模型裡的修復年：存活本身開始被重估" },
 ];
 
+const AIR: Record<RegimeId, string> = {
+  expansion: "市道偏暖。工作還找得到，人家也比較敢花錢。",
+  bubble: "價格跑在收入前面。周圍的人都覺得自己看懂了。",
+  recession: "訂單少了。家裡比新聞更早感覺到。",
+  crisis: "信用變貴，外面很吵。家裡的帳先緊起來。",
+  stagflation: "東西貴了，機會卻沒有一起來。",
+  recovery: "最壞的日子像是過去了，還沒好到可以揮霍。",
+  tightening: "借錢變得不舒服，能拖的開支都在拖。",
+  deflation: "東西便宜，人也變得不敢動。",
+};
+
 export function regimeFor(year: number, countryId: string): {
   id: RegimeId;
   name: string;
@@ -310,17 +321,17 @@ export function regimeFor(year: number, countryId: string): {
 } {
   if (year > 2026) {
     const item = FUTURE[(year - 2027) % FUTURE.length]!;
-    return { id: item.id, name: REGIME_NAME[item.id], headline: item.headline };
+    return { id: item.id, name: REGIME_NAME[item.id], headline: AIR[item.id] };
   }
   for (const rule of RULES) {
     if (year < rule.from || year > rule.to) continue;
     if (rule.countries && !rule.countries.includes(countryId)) continue;
     if (rule.exclude && rule.exclude.includes(countryId)) continue;
-    return { id: rule.id, name: REGIME_NAME[rule.id], headline: rule.headline };
+    return { id: rule.id, name: REGIME_NAME[rule.id], headline: AIR[rule.id] };
   }
   return {
     id: "expansion",
     name: REGIME_NAME.expansion,
-    headline: "沒有名字的普通年份，複利仍在安靜工作",
+    headline: AIR.expansion,
   };
 }
