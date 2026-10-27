@@ -208,6 +208,7 @@ export function createLife(input: BirthInput = {}): Life {
     price: life.price,
     cap: life.ipoCap,
     capUsd: capUsd0,
+    priceUsd: priceUsd0,
   });
   life.log.push({
     age: 0,
@@ -522,6 +523,7 @@ function closeYear(life: Life): Report {
     price: life.price,
     cap: life.price * life.shares,
     capUsd: usdCap,
+    priceUsd: usdPx,
   });
   const roll = plan.roll ?? 0;
   const surviveLine = died

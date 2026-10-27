@@ -5,6 +5,7 @@ import {
   GraduationCap,
   HeartPulse,
   Landmark,
+  Music,
   Rocket,
   RotateCcw,
   Scale,
@@ -36,6 +37,18 @@ import {
   priceMultiple,
   scoreOf,
 } from "@/game/format";
+import { PriceAgeChart } from "@/components/life/PriceChart";
+import {
+  MUSIC_THEMES,
+  blip,
+  configureMusic,
+  loadMusic,
+  setDuck,
+  toll,
+  unlockAudio,
+  DEFAULT_MUSIC,
+  type MusicPrefs,
+} from "@/game/music";
 import { tierLabel } from "@/game/names";
 import { POLICIES, type Policy } from "@/game/policies";
 import { regimeFor } from "@/game/regimes";
@@ -71,28 +84,6 @@ const POLICY_ICON: Record<PolicyId, typeof Shield> = {
   diversify: Globe,
   venture: Rocket,
 };
-
-let audioCtx: AudioContext | null = null;
-
-function blip(up: boolean) {
-  try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    audioCtx ??= new Ctx();
-    if (audioCtx.state === "suspended") void audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = "triangle";
-    osc.frequency.value = up ? 540 : 180;
-    gain.gain.setValueAtTime(0.028, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.08);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.09);
-  } catch {
-    /* autoplay locks are fine */
-  }
-}
 
 function tone(n: number): string {
   if (n > 0.0008) return "text-up";
@@ -191,18 +182,44 @@ export function LifeGame() {
   const [board, setBoard] = useState<RunRecord[]>([]);
   const [saved, setSaved] = useState<Snap | null>(null);
   const [decade, setDecade] = useState<number | null>(null);
-  const [sound, setSound] = useState(true);
+  const [music, setMusic] = useState<MusicPrefs>(DEFAULT_MUSIC);
+  const [musicOpen, setMusicOpen] = useState(false);
   const [returnTo, setReturnTo] = useState<Phase>("title");
   const [showLog, setShowLog] = useState(false);
   const [ready, setReady] = useState(false);
   const [quoting, setQuoting] = useState(true);
+  const tolled = useRef<string | null>(null);
 
   useEffect(() => {
     setBoard(loadBoard());
     setSaved(loadSnap());
+    const loaded = loadMusic();
+    setMusic(loaded);
+    configureMusic(loaded);
     setReady(true);
     window.__gushengBalance = runBalance;
   }, []);
+
+  useEffect(() => {
+    if (!musicOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setMusicOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [musicOpen]);
+
+  useEffect(() => {
+    setDuck(phase === "dead");
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "dead" || !life) return;
+    const key = `${life.ticker}-${life.birthYear}-${life.age}`;
+    if (tolled.current === key) return;
+    tolled.current = key;
+    toll();
+  }, [phase, life]);
 
   useEffect(() => {
     if (!ready || !life) return;
@@ -212,6 +229,7 @@ export function LifeGame() {
   }, [ready, phase, life, reports]);
 
   function born(input: BirthInput) {
+    unlockAudio();
     const created = createLife(input);
     setLife(created);
     setReports([]);
@@ -244,7 +262,7 @@ export function LifeGame() {
     setLife(recorded);
     setReports((prev) => [...prev, report].slice(-6));
     setPhase(recorded.alive ? "play" : "dead");
-    if (sound && (report.died || recorded.plan?.eventId)) blip(!report.died && report.pricePct >= 0);
+    if (music.sfx && (report.died || recorded.plan?.eventId)) blip(!report.died && report.pricePct >= 0);
   }
 
   function act(index: number) {
@@ -269,7 +287,7 @@ export function LifeGame() {
       else setLife(step.life);
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [ready, phase, quoting, life, sound]);
+  }, [ready, phase, quoting, life, music.sfx]);
 
   const market = life ? countryById(life.countryId) : null;
 
@@ -286,10 +304,18 @@ export function LifeGame() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setSound((v) => !v)}
-              className="min-h-11 rounded-xl border border-line px-3 text-sm text-muted"
+              aria-expanded={musicOpen}
+              onClick={() => {
+                unlockAudio();
+                setMusicOpen((open) => !open);
+              }}
+              className={
+                "inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm " +
+                (music.music ? "border-gold text-ivory" : "border-line text-muted")
+              }
             >
-              {sound ? "聲音開" : "聲音關"}
+              <Music className="size-4 text-gold" aria-hidden="true" />
+              {music.music ? MUSIC_THEMES.find((theme) => theme.id === music.theme)?.name : "靜音"}
             </button>
             <button
               type="button"
@@ -305,6 +331,18 @@ export function LifeGame() {
           </div>
         </header>
 
+        {musicOpen && (
+          <MusicPanel
+            prefs={music}
+            onClose={() => setMusicOpen(false)}
+            onChange={(next) => {
+              setMusic(next);
+              configureMusic(next);
+              unlockAudio();
+            }}
+          />
+        )}
+
         {phase === "title" && (
           <Title
             saved={saved}
@@ -312,6 +350,7 @@ export function LifeGame() {
             onPick={() => setPhase("pick")}
             onResume={() => {
               if (!saved) return;
+              unlockAudio();
               setLife(saved.life);
               setReports(saved.reports ?? []);
               setQuoting(true);
@@ -381,6 +420,87 @@ export function LifeGame() {
         {phase === "board" && <Board rows={board} onBack={() => setPhase(returnTo)} />}
       </div>
     </main>
+  );
+}
+
+function MusicPanel({
+  prefs,
+  onChange,
+  onClose,
+}: {
+  prefs: MusicPrefs;
+  onChange: (next: MusicPrefs) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-serif text-lg">音樂設定</p>
+        <button type="button" onClick={onClose} className="min-h-11 px-2 text-sm text-muted">
+          收起
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {MUSIC_THEMES.map((theme) => {
+          const on = prefs.theme === theme.id;
+          return (
+            <button
+              key={theme.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChange({ ...prefs, theme: theme.id, music: true })}
+              className={
+                "min-h-11 rounded-xl border px-4 text-sm " +
+                (on ? "border-gold bg-gold text-ink" : "border-line bg-panel-2 text-ivory")
+              }
+            >
+              {theme.name}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end">
+        <label className="block min-w-0 flex-1 text-sm">
+          <span className="flex items-center justify-between text-muted">
+            音量
+            <span className="font-mono text-ivory">{Math.round(prefs.volume * 100)}</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(prefs.volume * 100)}
+            aria-valuetext={`${Math.round(prefs.volume * 100)}%`}
+            onChange={(event) => onChange({ ...prefs, volume: Number(event.target.value) / 100, music: true })}
+            className="mt-2 w-full accent-gold"
+          />
+        </label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            aria-pressed={prefs.music}
+            onClick={() => onChange({ ...prefs, music: !prefs.music })}
+            className={
+              "min-h-11 rounded-xl border px-4 text-sm " +
+              (prefs.music ? "border-gold text-ivory" : "border-line text-muted")
+            }
+          >
+            {prefs.music ? "音樂開" : "音樂關"}
+          </button>
+          <button
+            type="button"
+            aria-pressed={prefs.sfx}
+            onClick={() => onChange({ ...prefs, sfx: !prefs.sfx })}
+            className={
+              "min-h-11 rounded-xl border px-4 text-sm " +
+              (prefs.sfx ? "border-gold text-ivory" : "border-line text-muted")
+            }
+          >
+            {prefs.sfx ? "音效開" : "音效關"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -878,57 +998,67 @@ function Dead({
   const epi = epitaph(life);
   const cap = life.price * life.shares;
   return (
-    <section className="grid gap-4 lg:grid-cols-5">
-      <div className="lg:col-span-3">
-        <div className="seal text-2xl">除牌</div>
-        <div className="mt-4">
-          <Person id={life.countryId} className="h-36 w-24" />
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <div className="seal text-2xl">除牌</div>
+          <h1 className="mt-4 font-serif text-4xl">{epi.title}</h1>
+          <p className="mt-2 text-sm text-gold">
+            {epi.grade} · 綜合 {epi.score}
+          </p>
+          <p className="mt-3 text-sm">
+            {life.name} · {life.ticker}
+            <br />
+            {life.birthYear}–{life.deathYear ?? life.birthYear + life.age} · 享年 {life.age} 歲 · {market.name}
+          </p>
         </div>
-        <h1 className="mt-6 font-serif text-4xl">{epi.title}</h1>
-        <p className="mt-2 text-sm text-gold">
-          {epi.grade} · 綜合 {epi.score}
-        </p>
-        <p className="mt-4 max-w-xl text-base leading-relaxed text-muted">{epi.text}</p>
-        <p className="mt-4 text-sm">
-          {life.name} · {life.ticker}
-          <br />
-          {life.birthYear}–{life.deathYear ?? life.birthYear + life.age} · 享年 {life.age} 歲 · {market.name}
-          <br />
-          死因：{life.cause ?? "未知"}
-        </p>
-        <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-          <button type="button" onClick={onAgain} className="min-h-11 rounded-xl bg-gold px-4 py-3 font-medium text-ink">
-            再投胎
-          </button>
-          <button
-            type="button"
-            onClick={onRerun}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line px-4 py-3"
-          >
-            <RotateCcw className="size-4" aria-hidden="true" />
-            同一顆種子
-          </button>
-          <button type="button" onClick={onToggleLog} className="min-h-11 rounded-xl border border-line px-4 py-3">
-            {showLog ? "收起年表" : "這世年表"}
-          </button>
-        </div>
-        {showLog && (
-          <div className="mt-4">
-            <Log life={life} />
-          </div>
-        )}
+        <Person id={life.countryId} className="h-36 w-24" />
       </div>
-      <dl className="grid content-start gap-4 rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
-        <Stat k="終值股價" v={`${formatPrice(life.price)} ${market.ccy}`} />
-        <Stat k="股價倍數" v={formatMultiple(priceMultiple(life))} />
-        <Stat k="終值市值" v={`${formatCompact(cap)} ${market.ccy}`} />
-        <Stat k="市值倍數" v={formatMultiple(capMultiple(life))} />
-        <Stat k="美元終值" v={`USD ${formatCompact(capUsd(life))}`} />
-        <Stat k="峰值市值" v={`USD ${formatCompact(life.peakCapUsd)}`} />
-        <p className="text-xs leading-relaxed text-muted">
-          分數同時看美元市值、相對開盤的倍數，以及你活了多久。出身很重，但把一隻仙股做成成長股，仍然算數。
-        </p>
-      </dl>
+      <div className="rounded-2xl border border-line bg-panel p-4 sm:p-5">
+        <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
+          <h2 className="font-serif text-2xl">股價以年齡</h2>
+          <p className="font-mono text-xs text-muted">美元</p>
+        </div>
+        <PriceAgeChart points={life.history} />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <p className="max-w-xl text-base leading-relaxed text-muted">{epi.text}</p>
+          <p className="mt-3 text-sm">死因：{life.cause ?? "未知"}</p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={onAgain} className="min-h-11 rounded-xl bg-gold px-4 py-3 font-medium text-ink">
+              再投胎
+            </button>
+            <button
+              type="button"
+              onClick={onRerun}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line px-4 py-3"
+            >
+              <RotateCcw className="size-4" aria-hidden="true" />
+              同一顆種子
+            </button>
+            <button type="button" onClick={onToggleLog} className="min-h-11 rounded-xl border border-line px-4 py-3">
+              {showLog ? "收起年表" : "這世年表"}
+            </button>
+          </div>
+          {showLog && (
+            <div className="mt-4">
+              <Log life={life} />
+            </div>
+          )}
+        </div>
+        <dl className="grid content-start gap-4 rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
+          <Stat k="終值股價" v={`${formatPrice(life.price)} ${market.ccy}`} />
+          <Stat k="股價倍數" v={formatMultiple(priceMultiple(life))} />
+          <Stat k="終值市值" v={`${formatCompact(cap)} ${market.ccy}`} />
+          <Stat k="市值倍數" v={formatMultiple(capMultiple(life))} />
+          <Stat k="美元終值" v={`USD ${formatCompact(capUsd(life))}`} />
+          <Stat k="峰值市值" v={`USD ${formatCompact(life.peakCapUsd)}`} />
+          <p className="text-xs leading-relaxed text-muted">
+            分數同時看美元市值、相對開盤的倍數，以及你活了多久。出身很重，但把一隻仙股做成成長股，仍然算數。
+          </p>
+        </dl>
+      </div>
     </section>
   );
 }

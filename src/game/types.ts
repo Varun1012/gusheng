@@ -39,6 +39,8 @@ export interface HistPoint {
   price: number;
   cap: number;
   capUsd: number;
+  /** Dollar price at the print. Missing on older saves; derived from cap. */
+  priceUsd?: number;
 }
 
 export interface LogLine {
