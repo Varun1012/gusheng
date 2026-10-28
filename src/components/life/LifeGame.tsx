@@ -24,6 +24,7 @@ import {
   previewMortality,
   runBalance,
   setPolicy,
+  spend,
 } from "@/game/engine";
 import {
   capMultiple,
@@ -52,6 +53,7 @@ import {
 import { tierLabel } from "@/game/names";
 import { POLICIES, policyFits, type Policy } from "@/game/policies";
 import { regimeFor } from "@/game/regimes";
+import { policyMood, SPENDS, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
 import type { BirthInput, HistPoint, Life, PolicyId, RegimeId, Report } from "@/game/types";
 
@@ -431,6 +433,13 @@ export function LifeGame() {
             showLog={showLog}
             onToggleLog={() => setShowLog((v) => !v)}
             onPolicy={(id) => setLife(setPolicy(life, id))}
+            onSpend={(id) => {
+              const before = life.price;
+              const next = spend(life, id);
+              if (next === life) return;
+              setLife(next);
+              if (music.sfx) blip(next.price >= before);
+            }}
             onChoose={(index) => act(index)}
             quoting={quoting}
             onToggleQuote={() => setQuoting((v) => !v)}
@@ -680,10 +689,11 @@ function Title({
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
-            <li>六種基本政策隨時可換。只有合當前市道的，才能把股價推上去。心理、健康、家庭、社會每一格都會動，並改寫估值。</li>
+            <li>六種基本政策隨時可換。只有合當前市道的，才能把股價推上去。換一套政策，心理、健康、家庭、社會會跟著偏。</li>
             <li>一年十格，每秒走一格。任何一格都可能要你抉擇，沒有排好的題號。沒有抉擇就繼續報價。</li>
             <li>市場的冷暖取材自歷史，只作背景，不跟某一年的新聞對時。臨到身上的是這個人的心理、身體、家庭和社會。</li>
             <li>出生時個人資金是零。父母會養，但不必等到十八歲：童工、兼職的錢進個人資金，看病、吃飯、人情從這裡出。十八歲董事局才定正式薪酬。</li>
+            <li>個人資金可以花在興趣上，也可以花下去換一種工作。每一格只能花一筆。花了，狀態會動。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
         </div>
@@ -815,6 +825,8 @@ function Birth({
             <Meter label="家庭" value={life.kin ?? 50} />
             <Meter label="社會" value={life.social ?? 50} />
           </div>
+          <p className="mt-3 text-xs leading-relaxed text-muted">{policyMood(life.policy)}</p>
+          {life.statusNote ? <p className="mt-1 text-sm text-ivory">{life.statusNote}</p> : null}
         </div>
         <div>
           <p className="mb-2 text-sm text-muted">基本政策，可以隨時換</p>
@@ -835,12 +847,92 @@ function Stat({ k, v }: { k: string; v: string }) {
   );
 }
 
+function SpendColumn({
+  life,
+  fx,
+  onSpend,
+}: {
+  life: Life;
+  fx: number;
+  onSpend: (id: string) => void;
+}) {
+  const hobbies = SPENDS.filter((item) => item.group === "hobby" && spendVisible(item, life.age));
+  const jobs = SPENDS.filter((item) => item.group === "work" && spendVisible(item, life.age));
+  const doing = workLabel(life.work);
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-serif text-2xl">個人花錢</h2>
+        <p className="text-xs text-muted">{doing ? `正在做的：${doing}` : "還沒選定工作"}</p>
+      </div>
+      <p className="mt-2 text-sm text-ivory">
+        {life.statusNote || "興趣和投入工作都會改狀態。每一格只能花一筆。"}
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-muted">
+        錢不夠的按不下去。去打零工可以先由家裡墊。換了基本政策，同一筆花法會把狀態帶往別的方向。
+      </p>
+      {hobbies.length === 0 && jobs.length === 0 ? (
+        <p className="mt-4 text-sm text-muted">還小，興趣和工作上的花費要再大一點。基本政策仍然會帶著狀態走。</p>
+      ) : (
+        <>
+          {hobbies.length > 0 && (
+            <SpendRow title="興趣" items={hobbies} life={life} fx={fx} onSpend={onSpend} />
+          )}
+          {jobs.length > 0 && <SpendRow title="工作" items={jobs} life={life} fx={fx} onSpend={onSpend} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SpendRow({
+  title,
+  items,
+  life,
+  fx,
+  onSpend,
+}: {
+  title: string;
+  items: typeof SPENDS;
+  life: Life;
+  fx: number;
+  onSpend: (id: string) => void;
+}) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs text-muted">{title}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => {
+          const open = spendOpen(item, life, fx);
+          const current = Boolean(item.work && life.work === item.work);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              disabled={!open}
+              onClick={() => onSpend(item.id)}
+              className={
+                "min-h-11 rounded-xl border px-3 py-2 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold " +
+                (current ? "border-gold bg-gold/15 text-ivory " : "border-line bg-panel-2 text-ivory ") +
+                (open ? "hover:border-gold" : "cursor-not-allowed opacity-40")
+              }
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Play({
   life,
   reports,
   showLog,
   onToggleLog,
   onPolicy,
+  onSpend,
   onChoose,
   quoting,
   onToggleQuote,
@@ -851,6 +943,7 @@ function Play({
   showLog: boolean;
   onToggleLog: () => void;
   onPolicy: (id: PolicyId) => void;
+  onSpend: (id: string) => void;
   onChoose: (index: number) => void;
   quoting: boolean;
   onToggleQuote: () => void;
@@ -951,7 +1044,9 @@ function Play({
             <Meter label="家庭" value={life.kin ?? 50} />
             <Meter label="社會" value={life.social ?? 50} />
           </div>
-          <p className="mt-3 text-xs leading-relaxed text-muted">這四條每一格都會動。轉差會壓低股價；轉好要基本政策合用，才抬得上去。</p>
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            這四條每一格都會動，花錢和換政策也會把它們推開。轉差會壓低股價；轉好要基本政策合用，才抬得上去。
+          </p>
         </div>
       </div>
 
@@ -959,7 +1054,10 @@ function Play({
         <p className="mb-2 text-sm text-muted">基本政策</p>
         <p className="mb-2 text-xs text-gold">{fitLine(plan.regimeId)}</p>
         <PolicyPicker active={life.policy} regimeId={plan.regimeId} onPick={onPolicy} />
+        <p className="mt-2 text-xs leading-relaxed text-muted">{policyMood(life.policy)}</p>
       </div>
+
+      <SpendColumn life={life} fx={market.fx} onSpend={onSpend} />
 
       {event ? (
         <div className="rounded-2xl border border-gold/50 bg-panel p-5">

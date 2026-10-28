@@ -128,6 +128,14 @@ export interface Life {
   salary: number;
   /** Side income in local currency: child work, part-time, gigs. Any age. */
   side: number;
+  /** Kind of work the purse was last spent on. */
+  work?: string;
+  /** Plain line for the latest spend or policy shift. No formula. */
+  statusNote?: string;
+  /** Age:cell that already spent. One purse action per cell. */
+  spentKey?: string;
+  /** Policy whose status nudge is currently applied. */
+  policyBias?: PolicyId;
   /** Mood. */
   mind: number;
   /** Family bond. */

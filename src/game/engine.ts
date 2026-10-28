@@ -4,6 +4,15 @@ import { capUsd, priceUsd } from "@/game/format";
 import { mortalityQx, naturalCause } from "@/game/mortality";
 import { familyLine, personName, reticker, tickerOf } from "@/game/names";
 import { POLICY_VOL, policyById, policyFits } from "@/game/policies";
+import {
+  describeMove,
+  policyNudge,
+  policyShiftLine,
+  invertDelta,
+  resolveDelta,
+  spendById,
+  spendCellKey,
+} from "@/game/spends";
 import { REGIME_DRIFT, REGIME_SCALAR, regimeFor } from "@/game/regimes";
 import type { ChoiceDef } from "@/game/event-types";
 import type { BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId, YearPlan } from "@/game/types";
@@ -827,10 +836,87 @@ function ageProductivity(age: number): number {
   return 0.32;
 }
 
+function applyDelta(
+  life: Life,
+  delta: { mind: number; health: number; kin: number; social: number; human: number; reputation: number },
+) {
+  life.mind = clamp(life.mind + delta.mind, 0, 100);
+  life.health = clamp(life.health + delta.health, 0, 100);
+  life.kin = clamp(life.kin + delta.kin, 0, 100);
+  life.social = clamp(life.social + delta.social, 0, 100);
+  life.human = clamp(life.human + delta.human, 0, 100);
+  life.reputation = clamp(life.reputation + delta.reputation, 0, 100);
+}
+
+function snapStats(life: Life) {
+  return {
+    mind: life.mind,
+    health: life.health,
+    kin: life.kin,
+    social: life.social,
+    human: life.human,
+    reputation: life.reputation,
+  };
+}
+
 export function setPolicy(life: Life, policy: PolicyId): Life {
+  if (life.policy === policy) return life;
   const next = copy(life);
+  if (next.policyBias) applyDelta(next, invertDelta(policyNudge(next.policyBias)));
+  applyDelta(next, policyNudge(policy));
+  next.policyBias = policy;
   next.policy = policy;
+  const line = policyShiftLine(policy);
+  next.statusNote = line;
+  if (next.plan) remember(next, line);
   return next;
+}
+
+/** Spend purse on a hobby or a kind of work. One action per cell. Does not advance the clock. */
+export function spend(source: Life, id: string): Life {
+  const item = spendById(id);
+  if (!item || !source.alive || !source.plan) return source;
+  if (source.age < item.minAge) return source;
+  if (item.maxAge !== undefined && source.age > item.maxAge) return source;
+  const key = spendCellKey(source);
+  if ((source.spentKey ?? "") === key) return source;
+  const fx = countryById(source.countryId).fx;
+  const cost = item.usd * fx;
+  const short = (source.purse ?? 0) < cost;
+  if (short && !item.stake) return source;
+
+  const life = copy(source);
+  const before = snapStats(life);
+  const beforeScore = lifeScore(life);
+  const delta = resolveDelta(life.policy, item);
+  if (short) {
+    life.purse = 0;
+    delta.kin -= 4;
+    delta.mind -= 3;
+  } else {
+    life.purse = Math.max(0, life.purse - cost);
+  }
+  applyDelta(life, delta);
+  const revalue = statusRevalue(beforeScore, lifeScore(life));
+  const appropriate = policyFit(life) >= 0.85;
+  let drift = appropriate ? revalue : Math.min(0, revalue);
+  drift = clamp(drift, -0.06, appropriate ? 0.04 : 0);
+  if (drift !== 0) movePrice(life, drift, 0);
+  if (item.ease) life.side = Math.max(0, life.side * 0.45);
+  else if (item.sideUsd !== undefined) life.side = Math.max(0, item.sideUsd * fx);
+  if (item.work) life.work = item.work;
+  life.spentKey = key;
+  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : undefined;
+  const note = describeMove(item.label, before, snapStats(life), short, tail);
+  life.statusNote = note;
+  remember(life, note);
+  life.log.push({
+    age: life.age,
+    year: life.plan?.year ?? life.birthYear + life.age,
+    title: "個人花錢",
+    detail: note,
+  });
+  return life;
 }
 
 export function fastForward(source: Life): { life: Life; reports: Report[] } {

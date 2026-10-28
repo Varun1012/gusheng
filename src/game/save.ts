@@ -34,6 +34,9 @@ export function loadSnap(): Snap | null {
     life.purse ??= 0;
     life.salary ??= 0;
     life.side ??= 0;
+    life.work ??= "";
+    life.statusNote ??= "";
+    life.spentKey ??= "";
     life.mind ??= 50;
     life.kin ??= 55;
     life.social ??= 45;
