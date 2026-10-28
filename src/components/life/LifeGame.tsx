@@ -20,12 +20,19 @@ import {
   currentEventCopy,
   acceptChoice,
   advance,
+  buyHome,
+  chairCost,
   choiceChance,
+  choiceMoney,
   choose,
   previewMortality,
   runBalance,
+  satisfaction,
+  sellHome,
   setPolicy,
   spend,
+  takeChair,
+  quotedHome,
 } from "@/game/engine";
 import {
   capMultiple,
@@ -420,6 +427,27 @@ export function LifeGame() {
               setLife(next);
               if (music.sfx) blip(next.price >= before);
             }}
+            onChair={() => {
+              const before = life.price;
+              const next = takeChair(life);
+              if (next === life) return;
+              setLife(next);
+              if (music.sfx) blip(next.price >= before);
+            }}
+            onBuyHome={(mode) => {
+              const before = life.price;
+              const next = buyHome(life, mode);
+              if (next === life) return;
+              setLife(next);
+              if (music.sfx) blip(next.price >= before);
+            }}
+            onSellHome={() => {
+              const before = life.price;
+              const next = sellHome(life);
+              if (next === life) return;
+              setLife(next);
+              if (music.sfx) blip(next.price >= before);
+            }}
             onChoose={(index) => act(index)}
             quoting={quoting}
             onToggleQuote={() => setQuoting((v) => !v)}
@@ -669,11 +697,12 @@ function Title({
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
-            <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏。</li>
-            <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。</li>
-            <li>興趣付一次就一直帶著。工作每一格一筆。個人投資先扣明金額，成不成也看狀態。</li>
-            <li>市場的冷暖取材自歷史，只作背景，不跟某一年的新聞對時。臨到身上的是這個人的心理、身體、家庭和社會。</li>
-            <li>出生時個人資金是零。父母會養，但不必等到十八歲：童工、兼職的錢進個人資金，看病、吃飯、人情從這裡出。十八歲董事局才定正式薪酬。</li>
+            <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏，滿足度也跟著偏。</li>
+            <li>股價跟著滿足度走。市場冷暖只是背景，不跟某一年的新聞對時。</li>
+            <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。走路、投票、去公園不用錢。</li>
+            <li>興趣一年只集中一門。大學選科、職業、買樓賣樓、投票，都是這個人自己的事。</li>
+            <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋。主席薪酬要先買回股票。</li>
+            <li>出生時個人資金是零。父母會養。童工、兼職、後來的職業，錢進個人資金。股票不會自動發薪酬。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
@@ -777,7 +806,7 @@ function Birth({
           出生那年：{regime.name}。{regime.headline}
         </p>
         <p className="mt-2 text-sm text-ivory">
-          {life.name} 出生時個人資金是 0。父母會養，但錢可以自己花，也可以更早去打零工。董事局要到十八歲才定正式薪酬。
+          {life.name} 出生時個人資金是 0。父母會養。股價跟著這個人的滿足度走，不跟著一份自動發下來的薪酬。
         </p>
         <dl className="mt-6 grid grid-cols-2 gap-4">
           <Stat k="開盤價" v={`${formatPrice(life.price)} ${market.ccy}`} />
@@ -831,47 +860,146 @@ function SpendColumn({
   life,
   fx,
   onSpend,
+  onChair,
+  onBuyHome,
+  onSellHome,
 }: {
   life: Life;
   fx: number;
   onSpend: (id: string) => void;
+  onChair: () => void;
+  onBuyHome: (mode: "cash" | "mortgage") => void;
+  onSellHome: () => void;
 }) {
   const hobbies = SPENDS.filter((item) => item.group === "hobby" && spendVisible(item, life.age));
   const jobs = SPENDS.filter((item) => item.group === "work" && spendVisible(item, life.age));
   const investments = SPENDS.filter((item) => item.group === "invest" && spendVisible(item, life.age));
   const doing = workLabel(life.work);
-  const hobby = SPENDS.find((item) => item.id === life.hobby);
+  const year = life.plan?.year ?? life.birthYear + life.age;
+  const focused = Boolean(life.hobby) && life.hobbyYear === year;
+  const hobby = focused ? SPENDS.find((item) => item.id === life.hobby) : undefined;
+  const ccy = countryById(life.countryId).ccy;
+  const home = quotedHome(life);
+  const down = home * 0.3;
+  const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
+  const traded = (life.houseYear ?? 0) === year;
+  const chair = life.age >= 18 ? chairCost(life) : 0;
   return (
     <div className="rounded-2xl border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-serif text-2xl">個人花錢</h2>
         <p className="text-xs text-muted">
-          {hobby ? `興趣持續：${hobby.label}` : "還沒有持續的興趣"}
+          {hobby ? `今年集中：${hobby.label}` : "今年還沒選興趣"}
           {doing ? ` · 正在做的：${doing}` : ""}
+          {life.career ? ` · 職業已定` : ""}
         </p>
       </div>
       <p className="mt-2 text-sm text-ivory">
-        {life.statusNote || "興趣付一次就一直帶著。投資會先扣明金額。"}
+        {life.statusNote || "興趣一年一門。走路和去公園不用錢。"}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
-        工作和投資每一格一筆。錢不夠的按不下去。去打零工可以先由家裡墊。
+        零工和投資其他公司，每一格一筆。錢不夠的按不下去。去打零工可以先由家裡墊。
       </p>
       {hobbies.length === 0 && jobs.length === 0 && investments.length === 0 ? (
-        <p className="mt-4 text-sm text-muted">還小，興趣、工作和投資要再大一點。</p>
+        <p className="mt-4 text-sm text-muted">還小，興趣要再大一點。</p>
       ) : (
         <>
           {hobbies.length > 0 && (
-            <SpendRow title="興趣" items={hobbies} life={life} fx={fx} ccy={countryById(life.countryId).ccy} onSpend={onSpend} />
+            <SpendRow title="興趣 · 一年一門" items={hobbies} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />
           )}
           {investments.length > 0 && (
-            <SpendRow title="個人投資" items={investments} life={life} fx={fx} ccy={countryById(life.countryId).ccy} onSpend={onSpend} />
+            <SpendRow title="投資其他公司" items={investments} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />
           )}
-          {jobs.length > 0 && (
-            <SpendRow title="工作" items={jobs} life={life} fx={fx} ccy={countryById(life.countryId).ccy} onSpend={onSpend} />
-          )}
+          {jobs.length > 0 && <SpendRow title="零工" items={jobs} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />}
         </>
       )}
+      {life.age >= 20 && (
+        <div className="mt-4">
+          <p className="text-xs text-muted">房子</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {life.flags.home ? (
+              <button
+                type="button"
+                disabled={traded}
+                onClick={onSellHome}
+                className={
+                  "min-h-11 rounded-xl border px-3 py-2 text-left text-sm " +
+                  (traded ? "cursor-not-allowed border-line opacity-40" : "border-gold bg-gold/15 text-ivory")
+                }
+              >
+                <span className="block">賣掉房子</span>
+                <span className="block text-xs text-muted">
+                  {equity > 1 ? `進帳 ${formatMoney(equity)} ${ccy}` : "賣了沒有進帳"}
+                  {traded ? " · 今年已買賣過" : ""}
+                </span>
+              </button>
+            ) : (
+              <>
+                <HouseButton
+                  label="付三成買樓"
+                  sub={`扣 ${formatMoney(down)} ${ccy}`}
+                  disabled={traded || life.purse + 0.5 < down}
+                  onClick={() => onBuyHome("mortgage")}
+                />
+                <HouseButton
+                  label="一次過付清"
+                  sub={`扣 ${formatMoney(home)} ${ccy}`}
+                  disabled={traded || life.purse + 0.5 < home}
+                  onClick={() => onBuyHome("cash")}
+                />
+              </>
+            )}
+          </div>
+          {life.flags.home && (life.homeDebt ?? 0) > 1 && (
+            <p className="mt-2 text-xs text-muted">還欠按揭 {formatMoney(life.homeDebt ?? 0)} {ccy}，每年再供一筆。</p>
+          )}
+        </div>
+      )}
+      {life.age >= 18 && (
+        <div className="mt-4">
+          <p className="text-xs text-muted">主席</p>
+          <div className="mt-2">
+            {life.chairman ? (
+              <p className="text-sm text-ivory">你是主席。薪酬 {formatMoney(life.salary)} {ccy} 入個人資金。</p>
+            ) : (
+              <HouseButton
+                label="買回股票，出任主席"
+                sub={`扣 ${formatMoney(chair)} ${ccy}`}
+                disabled={life.purse + 0.5 < chair}
+                onClick={onChair}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function HouseButton({
+  label,
+  sub,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  sub: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={
+        "min-h-11 rounded-xl border px-3 py-2 text-left text-sm " +
+        (disabled ? "cursor-not-allowed border-line opacity-40" : "border-line bg-panel-2 text-ivory hover:border-gold")
+      }
+    >
+      <span className="block">{label}</span>
+      <span className="block text-xs text-muted">{sub}</span>
+    </button>
   );
 }
 
@@ -896,15 +1024,22 @@ function SpendRow({
       <div className="mt-2 flex flex-wrap gap-2">
         {items.map((item) => {
           const open = spendOpen(item, life, fx);
-          const hobbyOn = item.group === "hobby" && life.hobby === item.id;
+          const year = life.plan?.year ?? life.birthYear + life.age;
+          const focused = Boolean(life.hobby) && life.hobbyYear === year;
+          const hobbyOn = item.group === "hobby" && focused && life.hobby === item.id;
+          const lockedOut = item.group === "hobby" && focused && life.hobby !== item.id;
           const workOn = Boolean(item.work && life.work === item.work);
           const cost = item.usd * fx;
           const chance = item.invest ? Math.round(investChance(life, item.invest.lean) * 100) : null;
           const sub = hobbyOn
-            ? "持續中"
-            : chance !== null
-              ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%`
-              : `扣 ${formatMoney(cost)} ${ccy}`;
+            ? "今年集中"
+            : lockedOut
+              ? "今年已有一門"
+              : item.usd <= 0
+                ? "不用錢"
+                : chance !== null
+                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%`
+                  : `扣 ${formatMoney(cost)} ${ccy}`;
           return (
             <button
               key={item.id}
@@ -934,6 +1069,9 @@ function Play({
   onToggleLog,
   onPolicy,
   onSpend,
+  onChair,
+  onBuyHome,
+  onSellHome,
   onChoose,
   quoting,
   onToggleQuote,
@@ -945,6 +1083,9 @@ function Play({
   onToggleLog: () => void;
   onPolicy: (id: PolicyId) => void;
   onSpend: (id: string) => void;
+  onChair: () => void;
+  onBuyHome: (mode: "cash" | "mortgage") => void;
+  onSellHome: () => void;
   onChoose: (index: number) => void;
   quoting: boolean;
   onToggleQuote: () => void;
@@ -1011,15 +1152,15 @@ function Play({
               <p className="font-mono text-3xl sm:text-4xl">{(life.purse ?? 0) > 0 ? formatCompact(life.purse) : "0"}</p>
               <p className="text-xs text-muted">{market.ccy}</p>
               <p className="mt-1 text-sm text-muted">
-                {life.age < 18
-                  ? life.side > 0
-                    ? "零工收入。日常開支從個人資金出"
-                    : "父母供養為主。資金可自己花，也可以去打零工"
-                  : life.salary > 0
-                    ? `年薪 ${formatCompact(life.salary)}${life.side > 0 ? " · 另有零工" : ""}`
-                    : life.side > 0
-                      ? "尚未有正式薪酬，零工仍算收入"
-                      : "董事局本年議薪"}
+                {life.chairman
+                  ? `主席薪酬 ${formatCompact(life.salary)} 入個人資金`
+                  : (life.job ?? 0) > 0
+                    ? `職業收入 ${formatCompact(life.job ?? 0)}${(life.side ?? 0) > 0 ? " · 另有零工" : ""}。股票薪酬不入帳`
+                    : (life.side ?? 0) > 0
+                      ? "零工進個人資金。股票薪酬不入帳"
+                      : life.age < 18
+                        ? "父母供養。個人資金跟股票分開"
+                        : "沒有職業收入。買回股票才有主席薪酬"}
               </p>
             </div>
           </div>
@@ -1040,13 +1181,14 @@ function Play({
             這一年的死亡率，拆開在十格裡擲。槓桿 {Math.round(life.leverage * 100)}%。
           </p>
           <div className="mt-4 space-y-3">
+            <Meter label="滿足度" value={satisfaction(life)} />
             <Meter label="心理" value={life.mind ?? 50} />
             <Meter label="健康" value={life.health} />
             <Meter label="家庭" value={life.kin ?? 50} />
             <Meter label="社會" value={life.social ?? 50} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted">
-            這四條每一格都會動，花錢和換政策也會把它們推開。轉差會壓低股價。
+            股價跟著滿足度走。有房子、有職業、今年有一門興趣，人會比較滿足。轉差會壓低股價。
           </p>
         </div>
       </div>
@@ -1057,7 +1199,14 @@ function Play({
         <p className="mt-2 text-xs leading-relaxed text-muted">{policyMood(life.policy)}</p>
       </div>
 
-      <SpendColumn life={life} fx={market.fx} onSpend={onSpend} />
+      <SpendColumn
+        life={life}
+        fx={market.fx}
+        onSpend={onSpend}
+        onChair={onChair}
+        onBuyHome={onBuyHome}
+        onSellHome={onSellHome}
+      />
 
       {event ? (
         <div className="rounded-2xl border border-gold/50 bg-panel p-5">
@@ -1069,14 +1218,16 @@ function Play({
           <div className="mt-4 grid gap-2">
             {choices.map((choice, index) => {
               const chance = Math.round(choiceChance(life, choice) * 100);
-              const cost = (choice.spendUsd ?? 0) * market.fx;
-              const gain = (choice.gainUsd ?? 0) * market.fx;
+              const moneyLine = choiceMoney(life, choice);
+              const wage = (choice.jobUsd ?? 0) * market.fx;
               const money =
-                cost > 0
-                  ? `扣 ${formatMoney(cost)} ${market.ccy}`
-                  : gain > 0
-                    ? `成了進帳 ${formatMoney(gain)} ${market.ccy}`
-                    : "";
+                moneyLine.cost > 0
+                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}`
+                  : moneyLine.gain > 0
+                    ? `進帳 ${formatMoney(moneyLine.gain)} ${market.ccy}`
+                    : wage > 0
+                      ? `職業每年 ${formatMoney(wage)} ${market.ccy}`
+                      : "";
               return (
                 <button
                   key={choice.label}

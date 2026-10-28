@@ -8,7 +8,8 @@ export type SpendId =
   | "sport"
   | "music"
   | "meal"
-  | "outing"
+  | "walk"
+  | "park"
   | "gig"
   | "craft"
   | "night"
@@ -53,11 +54,12 @@ function bars(
 }
 
 export const SPENDS: SpendDef[] = [
-  { id: "music", group: "hobby", label: "弄一門興趣", minAge: 4, usd: 32, base: bars(4, 1, 0, 2, 1, 0) },
-  { id: "sport", group: "hobby", label: "去運動", minAge: 5, usd: 28, base: bars(2, 5, 0, 1, 0, 0) },
-  { id: "read", group: "hobby", label: "買書", minAge: 6, usd: 36, base: bars(4, 0, 0, 1, 3, 0) },
-  { id: "meal", group: "hobby", label: "請家人吃飯", minAge: 6, usd: 46, base: bars(2, 1, 5, 0, 0, 0) },
-  { id: "outing", group: "hobby", label: "出門走走", minAge: 8, usd: 24, base: bars(1, 1, 1, 5, 0, 0) },
+  { id: "walk", group: "hobby", label: "走路", minAge: 4, usd: 0, base: bars(2, 3, 0, 1, 0, 0) },
+  { id: "park", group: "hobby", label: "去公園", minAge: 4, usd: 0, base: bars(2, 2, 0, 3, 0, 0) },
+  { id: "sport", group: "hobby", label: "去運動", minAge: 5, usd: 0, base: bars(2, 5, 0, 1, 0, 0) },
+  { id: "music", group: "hobby", label: "學樂器", minAge: 6, usd: 48, base: bars(4, 0, 0, 2, 2, 0) },
+  { id: "read", group: "hobby", label: "買書", minAge: 6, usd: 22, base: bars(4, 0, 0, 1, 3, 0) },
+  { id: "meal", group: "hobby", label: "請家人吃飯", minAge: 6, usd: 36, base: bars(2, 1, 5, 0, 0, 0) },
   {
     id: "gig",
     group: "work",
@@ -123,7 +125,7 @@ export const SPENDS: SpendDef[] = [
   {
     id: "index",
     group: "invest",
-    label: "買進指數",
+    label: "買海外公司",
     minAge: 16,
     usd: 800,
     invest: { lean: "skill", win: 1.5, lose: 0.75 },
@@ -132,7 +134,7 @@ export const SPENDS: SpendDef[] = [
   {
     id: "stake",
     group: "invest",
-    label: "加碼自己的事",
+    label: "買本地公司",
     minAge: 18,
     usd: 1000,
     invest: { lean: "nerve", win: 1.9, lose: 1 },
@@ -169,22 +171,35 @@ export function spendVisible(item: SpendDef, age: number): boolean {
   return true;
 }
 
+export function hobbyYearOf(life: {
+  birthYear: number;
+  age: number;
+  plan?: { year?: number } | null;
+}): number {
+  return life.plan?.year ?? life.birthYear + life.age;
+}
+
 export function spendOpen(
   item: SpendDef,
   life: {
     age: number;
+    birthYear: number;
     purse?: number;
     spentKey?: string;
     hobby?: string;
+    hobbyYear?: number;
     slot?: number;
-    plan?: { eventId?: string | null; committed?: boolean; pendingSlot?: number | null } | null;
+    plan?: { year?: number; eventId?: string | null; committed?: boolean; pendingSlot?: number | null } | null;
   },
   fx: number,
 ): boolean {
   if (!spendVisible(item, life.age)) return false;
-  if (item.group === "hobby" && life.hobby === item.id) return true;
+  const year = hobbyYearOf(life);
+  const focused = Boolean(life.hobby) && life.hobbyYear === year;
+  if (item.group === "hobby" && focused && life.hobby === item.id) return true;
+  if (item.group === "hobby" && focused && life.hobby !== item.id) return false;
   if (item.group !== "hobby" && (life.spentKey ?? "") === spendCellKey(life)) return false;
-  if (!item.stake && (life.purse ?? 0) < item.usd * fx) return false;
+  if (!item.stake && item.usd > 0 && (life.purse ?? 0) < item.usd * fx) return false;
   return true;
 }
 
@@ -273,9 +288,9 @@ export function resolveDelta(policy: PolicyId, spend: SpendDef): StatDelta {
   const delta = { ...spend.base };
   const extra = bars(0, 0, 0, 0, 0, 0);
   const study = spend.id === "read" || spend.id === "craft";
-  const body = spend.id === "sport" || spend.id === "ease";
+  const body = spend.id === "sport" || spend.id === "walk" || spend.id === "ease";
   const home = spend.id === "meal" || spend.id === "ease";
-  const people = spend.id === "outing" || spend.id === "music";
+  const people = spend.id === "park" || spend.id === "music" || spend.id === "walk";
   const ventureWork = spend.id === "stall" || spend.id === "craft";
 
   if (policy === "health") {

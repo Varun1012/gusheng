@@ -687,10 +687,10 @@ export const PERSONAL_EVENTS: GameEvent[] = [
     maxAge: 60,
     weight: 1.05,
     title: "正職以外還能再拼一塊",
-    body: "董事局的薪酬是一條線。零工是另一條。身體要投票。",
+    body: "職業收入是一條線。零工是另一條。主席薪酬要自己買回股票才有。身體要投票。",
     choices: [
       { label: "加上去", detail: "個人資金變厚", exposure: "career", price: 0.06, human: 1, health: -3, mind: -2, sideUsd: 3600 },
-      { label: "不做，把晚上還給自己", detail: "收入就是那份薪酬", exposure: "health", price: 0.04, mind: 4, health: 2, sideUsd: 0 },
+      { label: "不做，把晚上還給自己", detail: "晚上留下來", exposure: "health", price: 0.04, mind: 4, health: 2, sideUsd: 0 },
       { label: "做成暫時的，三個月", detail: "有終點比較好睡", exposure: "cash", price: 0.05, sideUsd: 2000, mind: -1 },
     ],
   },

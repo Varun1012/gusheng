@@ -21,6 +21,16 @@ export interface ChoiceDef {
   social?: number;
   /** Personal cash spent, in USD, converted to local. A shortfall strains kin and mind. */
   spendUsd?: number;
+  /** If set, the choice does not happen at all unless the purse covers the full cost. */
+  needFull?: boolean;
+  /** Subject id when this choice is a university pick. */
+  major?: string;
+  /** Occupation id. */
+  career?: string;
+  /** Own wage per year, USD. Not the chair package. */
+  jobUsd?: number;
+  /** Buy or sell a home with personal funds. */
+  house?: "cash" | "mortgage" | "sell";
   /** Cash received into personal funds, in USD. */
   gainUsd?: number;
   /** Sets yearly side income (child work, part-time), in USD. 0 quits it. */

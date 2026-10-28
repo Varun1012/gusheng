@@ -1,4 +1,5 @@
 import type { Life, Report } from "@/game/types";
+import { quotedHome } from "@/game/engine";
 
 const SNAP = "gusheng.snap.v1";
 const BOARD = "gusheng.board.v1";
@@ -33,9 +34,21 @@ export function loadSnap(): Snap | null {
     const life = snap.life;
     life.purse ??= 0;
     life.salary ??= 0;
+    life.job ??= 0;
     life.side ??= 0;
+    life.major ??= "";
+    life.career ??= "";
+    life.chairman ??= false;
     life.work ??= "";
     life.hobby ??= "";
+    life.hobbyYear ??= 0;
+    life.homeValue ??= 0;
+    life.homeDebt ??= 0;
+    life.houseYear ??= 0;
+    if (life.flags?.home && !(life.homeValue > 0)) {
+      life.homeValue = quotedHome(life);
+      life.homeDebt ??= 0;
+    }
     life.statusNote ??= "";
     life.spentKey ??= "";
     life.mind ??= 50;

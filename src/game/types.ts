@@ -126,14 +126,30 @@ export interface Life {
   leverage: number;
   /** Personal cash in local currency. Born at 0. Spendable at any age. */
   purse: number;
-  /** Formal annual pay in local currency. The board sets this from 18. */
+  /** Formal chair package in local currency. Paid into the purse only if they bought the chair. */
   salary: number;
+  /** Their own occupation wage, local currency. Not the stock's pay. */
+  job?: number;
+  /** Subject studied, if any. */
+  major?: string;
+  /** Occupation they hold. */
+  career?: string;
+  /** True after they buy back stock and take the chair. */
+  chairman?: boolean;
   /** Side income in local currency: child work, part-time, gigs. Any age. */
   side: number;
   /** Kind of work the purse was last spent on. */
   work?: string;
-  /** Hobby that keeps affecting status after it is paid for. */
+  /** Hobby focused for hobbyYear. One a year. */
   hobby?: string;
+  /** Calendar year of the focused hobby. */
+  hobbyYear?: number;
+  /** Owned home value in local currency. 0 if renting. */
+  homeValue?: number;
+  /** Mortgage still owed, local currency. */
+  homeDebt?: number;
+  /** Year of the last house trade. */
+  houseYear?: number;
   /** Plain line for the latest spend or policy shift. No formula. */
   statusNote?: string;
   /** Age:cell that already spent. One purse action per cell. */

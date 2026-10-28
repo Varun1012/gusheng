@@ -152,7 +152,16 @@ export function createLife(input: BirthInput = {}): Life {
     leverage: 0.1,
     purse: 0,
     salary: 0,
+    job: 0,
     side: 0,
+    major: "",
+    career: "",
+    chairman: false,
+    hobby: "",
+    hobbyYear: 0,
+    homeValue: 0,
+    homeDebt: 0,
+    houseYear: 0,
     mind: 50,
     kin: 50,
     social: 50,
@@ -338,10 +347,18 @@ function applyRelist(life: Life, targetId: string) {
   const usd = (life.price * life.shares) / from.fx;
   const purseUsd = (life.purse ?? 0) / from.fx;
   const sideUsd = (life.side ?? 0) / from.fx;
+  const jobUsd = (life.job ?? 0) / from.fx;
+  const salaryUsd = (life.salary ?? 0) / from.fx;
+  const homeUsd = (life.homeValue ?? 0) / from.fx;
+  const debtUsd = (life.homeDebt ?? 0) / from.fx;
   life.countryId = targetId;
   life.price = (usd / life.shares) * to.fx;
   life.purse = purseUsd * to.fx;
   life.side = sideUsd * to.fx;
+  life.job = jobUsd * to.fx;
+  life.salary = salaryUsd * to.fx;
+  life.homeValue = homeUsd * to.fx;
+  life.homeDebt = debtUsd * to.fx;
   life.ticker = reticker(life.ticker, targetId);
 }
 
@@ -377,14 +394,13 @@ function reviewPay(life: Life): string | undefined {
   }
   const prev = life.salary;
   const next = offerSalary(life);
-  if (prev <= 0) {
-    life.salary = next;
-    return "董事局按表現通過第一份薪酬";
-  }
-  life.salary = prev * 0.7 + next * 0.3;
+  if (prev <= 0) life.salary = next;
+  else life.salary = prev * 0.7 + next * 0.3;
+  if (!life.chairman) return undefined;
+  if (prev <= 0) return "主席薪酬開始入個人資金";
   const change = (life.salary - prev) / prev;
   if (Math.abs(change) < 0.12) return undefined;
-  return change > 0 ? "董事局上調薪酬" : "董事局削減薪酬";
+  return change > 0 ? "主席薪酬上調" : "主席薪酬減少";
 }
 
 const CELL_QUIET = ["沒有頭條的一格", "報價自己往前走", "這格只剩呼吸和租金", "市場沒有叫你的名字", "帳本翻過一頁"];
@@ -430,19 +446,85 @@ function pushPrint(life: Life) {
 }
 
 function accrueSlot(life: Life) {
-  const parentCover = life.age < 18 && life.salary <= 0 && life.side <= 0;
-  if (parentCover) return;
-  const inflow = (life.salary + life.side) / 10;
-  const living = life.age < 18 ? life.side * 0.035 : life.salary * 0.064 + life.side * 0.04;
+  const own = (life.job ?? 0) + (life.side ?? 0);
+  const chair = life.chairman ? life.salary : 0;
+  if (life.age < 18 && own <= 0 && chair <= 0) return;
+  const inflow = (own + chair) / 10;
+  const living = (life.age < 18 ? (life.side ?? 0) * 0.035 : (own + chair) * 0.16) / 10;
   life.purse = Math.max(0, life.purse + inflow - living);
-  if (life.age >= 18 && life.salary <= 0 && life.side <= 0 && life.purse > 0) {
-    const fx = countryById(life.countryId).fx;
-    life.purse = Math.max(0, life.purse - (80 * fx) / 10);
-  }
 }
 
-function lifeScore(life: Life): number {
-  return (life.mind + life.health + life.kin + life.social + life.human + life.reputation) / 6;
+const HOME_USD: Record<string, number> = {
+  hk: 480000,
+  jp: 210000,
+  sg: 420000,
+  kr: 280000,
+  tw: 220000,
+  gb: 300000,
+  de: 240000,
+  us: 260000,
+  cn: 150000,
+  br: 90000,
+  in: 70000,
+  ng: 40000,
+  fr: 250000,
+  it: 200000,
+  ca: 280000,
+  au: 320000,
+  id: 60000,
+  mx: 80000,
+  ph: 55000,
+  eg: 50000,
+};
+
+const MAJOR_FIT: Record<string, string[]> = {
+  business: ["clerk", "shop"],
+  stem: ["engineer"],
+  care: ["care"],
+  letters: ["teacher", "civil"],
+};
+
+function majorFits(major?: string, career?: string): boolean {
+  if (!major || !career) return false;
+  return (MAJOR_FIT[major] ?? []).includes(career);
+}
+
+/** What the listed life is worth: how satisfied the person is, not the chair package. */
+export function satisfaction(life: Life): number {
+  const base = life.mind * 0.3 + life.health * 0.24 + life.kin * 0.24 + life.social * 0.22;
+  let score = base;
+  if (life.flags.home) score += 6;
+  if (life.career) score += 4;
+  if (majorFits(life.major, life.career)) score += 3;
+  const year = life.plan?.year ?? life.birthYear + life.age;
+  if (life.hobby && life.hobbyYear === year) score += 3;
+  if (life.age >= 23 && !life.career && (life.job ?? 0) <= 0 && (life.side ?? 0) <= 0 && !life.chairman) score -= 8;
+  return clamp(score, 0, 100);
+}
+
+function priceFromSatisfaction(before: number, after: number): number {
+  const level = ((after - 50) / 50) * 0.022;
+  const moved = (after - before) * 0.0025;
+  return clamp(level + moved, -0.045, 0.035);
+}
+
+export function quotedHome(life: Life): number {
+  const usd = HOME_USD[life.countryId] ?? 150000;
+  return usd * countryById(life.countryId).fx;
+}
+
+export function choiceMoney(life: Life, choice: ChoiceDef): { cost: number; gain: number } {
+  const fx = countryById(life.countryId).fx;
+  if (choice.house === "cash") return { cost: quotedHome(life), gain: 0 };
+  if (choice.house === "mortgage") return { cost: quotedHome(life) * 0.3, gain: 0 };
+  if (choice.house === "sell") {
+    return { cost: 0, gain: Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0)) };
+  }
+  return { cost: Math.max(0, (choice.spendUsd ?? 0) * fx), gain: Math.max(0, (choice.gainUsd ?? 0) * fx) };
+}
+
+export function chairCost(life: Life): number {
+  return Math.max(offerSalary(life), countryById(life.countryId).fx * 4000) * 3;
 }
 
 function policyFit(life: Life): number {
@@ -507,7 +589,8 @@ function tickStats(life: Life) {
   life.social = clamp(life.social + (socialTarget - life.social) * pull + jitter(), 0, 100);
   life.reputation = clamp(life.reputation + (repTarget - life.reputation) * pull + jitter() * 0.55, 0, 100);
   const hobby = life.hobby ? spendById(life.hobby) : undefined;
-  if (hobby?.group === "hobby") {
+  const hobbyYear = life.plan?.year ?? life.birthYear + life.age;
+  if (hobby?.group === "hobby" && life.hobbyYear === hobbyYear) {
     const drip = resolveDelta(life.policy, hobby);
     const keep = 0.12;
     life.mind = clamp(life.mind + drip.mind * keep, 0, 100);
@@ -534,10 +617,6 @@ export function choiceChance(life: Life, choice: ChoiceDef): number {
   const samples = choiceSamples(life, choice.exposure);
   const avg = samples.reduce((sum, n) => sum + n, 0) / samples.length;
   return clamp(0.16 + (avg / 100) * 0.76, 0.12, 0.93);
-}
-
-function statusRevalue(before: number, after: number): number {
-  return clamp((after - before) * 0.012, -0.03, 0.03);
 }
 
 function slotDrift(life: Life): number {
@@ -631,25 +710,21 @@ function kill(life: Life, cause: string): Report {
 
 function playQuietSlot(life: Life) {
   const plan = life.plan!;
-  const before = lifeScore(life);
+  const satBefore = satisfaction(life);
   tickStats(life);
-  const revalue = statusRevalue(before, lifeScore(life));
-  const appropriate = policyFit(life) >= 0.85;
-  let drift = slotDrift(life);
+  const personal = priceFromSatisfaction(satBefore, satisfaction(life));
+  let drift = personal + slotDrift(life) * 0.15;
   let title = CELL_QUIET[Math.floor(draw(life) * CELL_QUIET.length)]!;
   let shown = title;
   if (draw(life) < 0.55) {
     const tape = TAPES[Math.floor(draw(life) * TAPES.length)]!;
-    if (appropriate || tape.price <= 0) {
-      drift += tape.price;
+    if (tape.price <= 0 || personal >= 0) {
+      drift += tape.price * 0.35;
       title = tape.title;
       shown = tape.line;
     }
   }
-  if (appropriate) drift += revalue;
-  else drift += Math.min(0, revalue);
-  if (!appropriate) drift = Math.min(0, drift);
-  drift = clamp(drift, -0.09, appropriate ? 0.08 : 0);
+  drift = clamp(drift, -0.08, 0.07);
   movePrice(life, drift, 0);
   life.slot = (life.slot ?? 0) + 1;
   accrueSlot(life);
@@ -668,9 +743,18 @@ function applyChoice(life: Life, index: number): Report | null {
   if (!event || index < 0 || index >= event.choices.length) throw new Error("choice required");
   const choice = event.choices[index]!;
   const priceBefore = life.price;
-  const scoreBefore = lifeScore(life);
+  const satBefore = satisfaction(life);
+  const fxNow = countryById(life.countryId).fx;
+  const ccyNow = countryById(life.countryId).ccy;
+  const tuition = Math.max(0, (choice.spendUsd ?? 0) * fxNow);
+  const buying = (choice.house === "cash" || choice.house === "mortgage") && !life.flags.home;
+  const houseDue = !buying ? 0 : choice.house === "cash" ? quotedHome(life) : quotedHome(life) * 0.3;
+  const due = Math.max(tuition, houseDue);
+  const mustFund = Boolean(choice.needFull) || buying;
+  const afford = !mustFund || life.purse + 0.5 >= due;
+  const broke = mustFund && !afford;
   const scalar = REGIME_SCALAR[plan.regimeId][choice.exposure];
-  let pricePct = choice.price * scalar;
+  let pricePct = choice.price * scalar * 0.45;
   const aligned = policyById(life.policy).exposure === choice.exposure;
   const risky: Exposure[] = ["leverage", "venture", "real"];
   const hedged = (life.policy === "cash" || life.policy === "diversify") && pricePct < 0 && risky.includes(choice.exposure);
@@ -696,9 +780,11 @@ function applyChoice(life: Life, index: number): Report | null {
   }
   const sharePct = choice.shares ?? 0;
   const chance = choiceChance(life, choice);
-  const succeeded = draw(life) < chance;
+  const rollOk = draw(life) < chance;
+  const succeeded = !broke && rollOk;
   const tilt = (n?: number) => {
     const value = n ?? 0;
+    if (broke) return 0;
     if (succeeded || value <= 0) return value;
     return -Math.max(1, Math.round(value * 0.45));
   };
@@ -710,26 +796,27 @@ function applyChoice(life: Life, index: number): Report | null {
   life.social = clamp(life.social + tilt(choice.social), 0, 100);
   life.leverage = clamp(life.leverage + (succeeded ? (choice.leverage ?? 0) : Math.min(0, choice.leverage ?? 0)), 0, 0.94);
   if (succeeded && choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
-  tickStats(life);
-  const revalue = statusRevalue(scoreBefore, lifeScore(life));
-  const fit = policyFit(life);
-  const appropriate = fit >= 0.85;
-  if (!appropriate) {
-    pricePct = Math.min(0, pricePct) - Math.max(0, 0.85 - fit) * 0.03 + Math.min(0, revalue);
-  } else {
-    pricePct = pricePct * (0.65 + Math.min(fit, 1.8) * 0.4) + revalue;
+  if (succeeded && choice.major) life.major = choice.major;
+  if (succeeded && choice.career) {
+    life.career = choice.career;
+    if (majorFits(life.major, choice.career)) {
+      life.mind = clamp(life.mind + 4, 0, 100);
+      life.human = clamp(life.human + 3, 0, 100);
+    }
   }
-  pricePct = clamp(pricePct, -0.72, appropriate && succeeded ? 0.95 : 0);
-  if (!succeeded) pricePct = Math.min(pricePct, -0.01);
+  if (succeeded && choice.jobUsd !== undefined) life.job = Math.max(0, choice.jobUsd * fxNow);
+  tickStats(life);
+  const satNow = satisfaction(life);
+  if (!broke) pricePct += priceFromSatisfaction(satBefore, satNow);
+  else pricePct = 0;
+  pricePct = clamp(pricePct, -0.55, succeeded ? 0.4 : 0);
+  if (!succeeded && !broke) pricePct = Math.min(pricePct, -0.01);
   movePrice(life, pricePct, succeeded ? sharePct : Math.min(0, sharePct));
   const economic = life.price / priceBefore - 1;
-  const bits = [
-    appropriate
-      ? `基本政策合這段「${plan.regimeName}」，這一步可以改寫股價，結果 ${signed(economic)}`
-      : `基本政策不合這段「${plan.regimeName}」，股價沒有被推上去，結果 ${signed(economic)}`,
-  ];
+  const bits = [`滿足度 ${Math.round(satNow)}，股價按這個改寫，結果 ${signed(economic)}`];
   if (bust) bits.push("對手方倒了，這筆變成虧損");
-  if (!succeeded) bits.push("這一步沒成");
+  if (!succeeded && !broke) bits.push("這一步沒成");
+  if (broke) bits.push("個人資金不夠，這一步沒有辦成");
   if (margin) bits.push("槓桿觸發追繳");
   if (sharePct > 0.02) bits.push("流通股增發，每股被攤薄");
   if (sharePct < -0.02) bits.push("公司回購了一部分");
@@ -756,12 +843,35 @@ function applyChoice(life: Life, index: number): Report | null {
   const fx = countryById(life.countryId).fx;
   const ccy = countryById(life.countryId).ccy;
   const money: string[] = [];
-  if (succeeded && choice.gainUsd) {
-    const gained = choice.gainUsd * fx;
-    life.purse += gained;
-    money.push(`個人資金進了 ${formatMoney(gained)} ${ccy}`);
-  }
-  if (choice.spendUsd && choice.spendUsd > 0) {
+  const bought = buying && afford && succeeded;
+  if (broke) {
+    money.push(`這筆要 ${formatMoney(due)} ${ccyNow}，個人資金不夠，沒有辦成`);
+  } else if (choice.house === "sell" && life.flags.home && succeeded) {
+    const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
+    life.purse += equity;
+    life.flags = { ...life.flags, home: false };
+    life.homeValue = 0;
+    life.homeDebt = 0;
+    life.houseYear = plan.year;
+    money.push(
+      equity > 1
+        ? `賣出房子。個人資金進了 ${formatMoney(equity)} ${ccy}`
+        : "賣出房子。樓價蓋不住欠款，個人資金沒有進帳",
+    );
+  } else if (bought) {
+    const price = quotedHome(life);
+    const pay = choice.house === "cash" ? price : price * 0.3;
+    life.purse = Math.max(0, life.purse - pay);
+    life.flags = { ...life.flags, home: true };
+    life.homeValue = price;
+    life.homeDebt = choice.house === "cash" ? 0 : price - pay;
+    life.houseYear = plan.year;
+    money.push(
+      choice.house === "cash"
+        ? `一次過買下房子。個人資金扣了 ${formatMoney(pay)} ${ccy}`
+        : `付了三成買樓。個人資金扣了 ${formatMoney(pay)} ${ccy}。其餘日後再供`,
+    );
+  } else if (choice.spendUsd && choice.spendUsd > 0) {
     const cost = choice.spendUsd * fx;
     const paid = Math.min(life.purse, cost);
     if (life.purse >= cost) life.purse -= cost;
@@ -776,7 +886,15 @@ function applyChoice(life: Life, index: number): Report | null {
         : `這筆要 ${formatMoney(cost)} ${ccy}，個人資金只扣到見底，扣了 ${formatMoney(paid)} ${ccy}`,
     );
   }
-  const outcome = `${choice.label}。${succeeded ? "成了" : "沒成"}`;
+  if (succeeded && choice.gainUsd) {
+    const gained = choice.gainUsd * fx;
+    life.purse += gained;
+    money.push(`個人資金進了 ${formatMoney(gained)} ${ccy}`);
+  }
+  if (succeeded && choice.jobUsd !== undefined && (choice.jobUsd ?? 0) > 0) {
+    money.push(`職業收入每年 ${formatMoney(life.job ?? 0)} ${ccy}，進個人資金`);
+  }
+  const outcome = `${choice.label}。${broke ? "沒有辦成" : succeeded ? "成了" : "沒成"}`;
   plan.detail = money.length > 0 ? `${outcome}。${money.join("。")}` : outcome;
   plan.eventId = null;
   plan.committed = true;
@@ -799,6 +917,23 @@ function ageAYear(life: Life) {
   const target = life.policy === "cash" ? 0.06 : life.policy === "leverage" ? 0.58 : life.policy === "venture" ? 0.34 : 0.16;
   life.leverage = clamp(life.leverage + (target - life.leverage) * 0.18, 0, 0.94);
   life.side = Math.max(0, life.side * 0.9);
+  if (life.flags.home && (life.homeValue ?? 0) > 0) {
+    const regime = life.plan?.regimeId;
+    const bump =
+      regime === "bubble" ? 0.06 : regime === "crisis" ? -0.08 : regime === "recession" ? -0.03 : regime === "recovery" || regime === "expansion" ? 0.02 : 0.005;
+    life.homeValue = Math.max(0, (life.homeValue ?? 0) * (1 + bump));
+  }
+  if (life.flags.home && (life.homeDebt ?? 0) > 0) {
+    const owed = life.homeDebt ?? 0;
+    const bill = owed * 0.06;
+    const paid = Math.min(life.purse, bill);
+    life.purse -= paid;
+    if (paid + 0.5 >= bill) life.homeDebt = Math.max(0, owed - bill * 0.45);
+    else {
+      life.mind = clamp(life.mind - 3, 0, 100);
+      life.kin = clamp(life.kin - 2, 0, 100);
+    }
+  }
 }
 
 function closeYear(life: Life): Report {
@@ -817,7 +952,7 @@ function closeYear(life: Life): Report {
       age: life.age,
       year: plan.year,
       title: plan.payNote,
-      detail: `年薪 ${Math.round(life.salary).toLocaleString("zh-HK")} ${countryById(life.countryId).ccy}。`,
+      detail: `主席薪酬 ${Math.round(life.salary).toLocaleString("zh-HK")} ${countryById(life.countryId).ccy}，已入個人資金。`,
     });
   }
   life.age += 1;
@@ -944,30 +1079,35 @@ export function spend(source: Life, id: string): Life {
   if (!item || !source.alive || !source.plan) return source;
   if (source.age < item.minAge) return source;
   if (item.maxAge !== undefined && source.age > item.maxAge) return source;
-  if (item.group === "hobby" && source.hobby === item.id) return source;
+  if (item.group === "hobby" && source.hobby === item.id && source.hobbyYear === (source.plan?.year ?? source.birthYear + source.age)) {
+    return source;
+  }
   const key = spendCellKey(source);
   if (item.group !== "hobby" && (source.spentKey ?? "") === key) return source;
+  const year = source.plan?.year ?? source.birthYear + source.age;
+  if (item.group === "hobby" && source.hobby && source.hobbyYear === year && source.hobby !== item.id) return source;
   const fx = countryById(source.countryId).fx;
   const ccy = countryById(source.countryId).ccy;
+  const free = item.usd <= 0;
   const cost = item.usd * fx;
-  const short = (source.purse ?? 0) < cost;
+  const short = !free && (source.purse ?? 0) < cost;
   if (short && !item.stake) return source;
 
   const life = copy(source);
   const before = snapStats(life);
-  const beforeScore = lifeScore(life);
+  const satBefore = satisfaction(life);
   const delta = resolveDelta(life.policy, item);
   const paid = short ? life.purse : cost;
   if (short) {
     life.purse = 0;
     delta.kin -= 4;
     delta.mind -= 3;
-  } else {
+  } else if (!free) {
     life.purse = Math.max(0, life.purse - cost);
   }
   let back = 0;
   let invested: boolean | null = null;
-  if (item.invest && !short) {
+  if (item.invest && !short && !free) {
     invested = draw(life) < investChance(life, item.invest.lean);
     back = invested ? paid * item.invest.win : paid * (1 - item.invest.lose);
     life.purse += back;
@@ -983,17 +1123,17 @@ export function spend(source: Life, id: string): Life {
     if (invested && (item.invest.lean === "skill" || item.invest.lean === "nerve")) delta.reputation += 2;
   }
   applyDelta(life, delta);
-  const revalue = statusRevalue(beforeScore, lifeScore(life));
-  const appropriate = policyFit(life) >= 0.85;
-  let drift = appropriate ? revalue : Math.min(0, revalue);
-  drift = clamp(drift, -0.06, appropriate ? 0.04 : 0);
+  const drift = priceFromSatisfaction(satBefore, satisfaction(life));
   if (drift !== 0) movePrice(life, drift, 0);
   if (item.ease) life.side = Math.max(0, life.side * 0.45);
   else if (item.sideUsd !== undefined) life.side = Math.max(0, item.sideUsd * fx);
   if (item.work) life.work = item.work;
-  if (item.group === "hobby") life.hobby = item.id;
+  if (item.group === "hobby") {
+    life.hobby = item.id;
+    life.hobbyYear = year;
+  }
   if (item.group !== "hobby") life.spentKey = key;
-  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : item.group === "hobby" ? "這門興趣會一直帶著" : undefined;
+  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : item.group === "hobby" ? "今年就集中這一門" : undefined;
   let note = describeMove(item.label, before, snapStats(life), short, tail);
   if (item.invest && invested !== null) {
     note = invested
@@ -1003,6 +1143,8 @@ export function spend(source: Life, id: string): Life {
         : `個人資金扣了 ${formatMoney(paid)} ${ccy}。${item.label}沒成，回來 ${formatMoney(back)} ${ccy}。`;
   } else if (short) {
     note = `${note}這筆要 ${formatMoney(cost)} ${ccy}，個人資金扣了 ${formatMoney(paid)} ${ccy}，其餘由家裡墊了。`;
+  } else if (free) {
+    note = `${note}這項不用錢。`;
   } else {
     note = `${note}個人資金扣了 ${formatMoney(paid)} ${ccy}。`;
   }
@@ -1011,9 +1153,91 @@ export function spend(source: Life, id: string): Life {
   life.log.push({
     age: life.age,
     year: life.plan?.year ?? life.birthYear + life.age,
-    title: item.group === "invest" ? "個人投資" : "個人花錢",
+    title: item.group === "invest" ? "投資其他公司" : "個人花錢",
     detail: note,
   });
+  return life;
+}
+
+function noteLife(life: Life, title: string, note: string) {
+  life.statusNote = note;
+  remember(life, note);
+  life.log.push({
+    age: life.age,
+    year: life.plan?.year ?? life.birthYear + life.age,
+    title,
+    detail: note,
+  });
+}
+
+export function buyHome(source: Life, mode: "cash" | "mortgage"): Life {
+  if (!source.alive || !source.plan || source.age < 20 || source.flags.home) return source;
+  const year = source.plan.year;
+  if ((source.houseYear ?? 0) === year) return source;
+  const price = quotedHome(source);
+  const due = mode === "cash" ? price : price * 0.3;
+  if (source.purse + 0.5 < due) return source;
+  const life = copy(source);
+  const satBefore = satisfaction(life);
+  life.purse -= due;
+  life.flags = { ...life.flags, home: true };
+  life.homeValue = price;
+  life.homeDebt = mode === "cash" ? 0 : price - due;
+  life.houseYear = year;
+  life.kin = clamp(life.kin + 4, 0, 100);
+  life.mind = clamp(life.mind + (mode === "cash" ? 3 : -1), 0, 100);
+  const drift = priceFromSatisfaction(satBefore, satisfaction(life));
+  if (drift !== 0) movePrice(life, drift, 0);
+  const ccy = countryById(life.countryId).ccy;
+  const note =
+    mode === "cash"
+      ? `一次過買下房子。個人資金扣了 ${formatMoney(due)} ${ccy}。`
+      : `付了三成買樓。個人資金扣了 ${formatMoney(due)} ${ccy}。其餘日後再供。`;
+  noteLife(life, "房子", note);
+  return life;
+}
+
+export function sellHome(source: Life): Life {
+  if (!source.alive || !source.plan || !source.flags.home) return source;
+  const year = source.plan.year;
+  if ((source.houseYear ?? 0) === year) return source;
+  const life = copy(source);
+  const satBefore = satisfaction(life);
+  const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
+  life.purse += equity;
+  life.flags = { ...life.flags, home: false };
+  life.homeValue = 0;
+  life.homeDebt = 0;
+  life.houseYear = year;
+  life.kin = clamp(life.kin - 2, 0, 100);
+  const drift = priceFromSatisfaction(satBefore, satisfaction(life));
+  if (drift !== 0) movePrice(life, drift, 0);
+  const ccy = countryById(life.countryId).ccy;
+  const note =
+    equity > 1
+      ? `賣出房子。個人資金進了 ${formatMoney(equity)} ${ccy}。`
+      : "賣出房子。樓價蓋不住欠款，個人資金沒有進帳。";
+  noteLife(life, "房子", note);
+  return life;
+}
+
+export function takeChair(source: Life): Life {
+  if (!source.alive || !source.plan || source.chairman || source.age < 18) return source;
+  const cost = chairCost(source);
+  if (source.purse + 0.5 < cost) return source;
+  const life = copy(source);
+  const satBefore = satisfaction(life);
+  life.purse -= cost;
+  life.chairman = true;
+  const cap = Math.max(life.price * life.shares, 1);
+  const fraction = Math.min(0.2, cost / cap);
+  life.shares = Math.max(1, life.shares * (1 - fraction));
+  life.reputation = clamp(life.reputation + 3, 0, 100);
+  life.mind = clamp(life.mind - 1, 0, 100);
+  const drift = priceFromSatisfaction(satBefore, satisfaction(life));
+  if (drift !== 0) movePrice(life, drift, 0);
+  const ccy = countryById(life.countryId).ccy;
+  noteLife(life, "主席", `買回股票，出任主席。個人資金扣了 ${formatMoney(cost)} ${ccy}。之後的主席薪酬入個人資金。`);
   return life;
 }
 
