@@ -34,6 +34,7 @@ export function loadSnap(): Snap | null {
     if (!snap?.life?.ticker || !snap.phase) return null;
     const life = snap.life;
     life.purse ??= 0;
+    life.debt ??= 0;
     life.salary ??= 0;
     life.job ??= 0;
     life.side ??= 0;

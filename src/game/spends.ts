@@ -199,7 +199,6 @@ export function spendOpen(
   if (item.group === "hobby" && focused && life.hobby === item.id) return true;
   if (item.group === "hobby" && focused && life.hobby !== item.id) return false;
   if (item.group !== "hobby" && (life.spentKey ?? "") === spendCellKey(life)) return false;
-  if (!item.stake && item.usd > 0 && (life.purse ?? 0) < item.usd * fx) return false;
   return true;
 }
 
@@ -400,7 +399,7 @@ export function describeMove(
   label: string,
   before: StatDelta,
   after: StatDelta,
-  shortfall: boolean,
+  _shortfall: boolean,
   tail?: string,
 ): string {
   const bits: string[] = [];
@@ -409,7 +408,7 @@ export function describeMove(
     if (diff >= 0.5) bits.push(UP[key]);
     else if (diff <= -0.5) bits.push(DOWN[key]);
   }
-  const head = shortfall ? `家裡先墊了${label}` : `花在${label}`;
+  const head = `花在${label}`;
   const body = bits.length > 0 ? bits.join("，") : "狀態幾乎沒有再動";
   const end = tail ? `${tail}。` : "";
   return `${head}。${body}。${end}`;

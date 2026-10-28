@@ -151,6 +151,8 @@ export interface Life {
   leverage: number;
   /** Personal cash in local currency. Born at 0. Spendable at any age. */
   purse: number;
+  /** Unsecured personal debt in local currency. Shortfalls land here. */
+  debt?: number;
   /** Formal chair package in local currency. Paid into the purse only if they bought the chair. */
   salary: number;
   /** Their own occupation wage, local currency. Not the stock's pay. */

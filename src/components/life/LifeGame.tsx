@@ -700,10 +700,10 @@ function Title({
             <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏，滿足度也跟著偏。</li>
             <li>股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。遇上經濟大事，價格會先重重晃一下，再收回一部分。</li>
             <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
-            <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
+            <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。不夠的差額記成負債，不會辦不成。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>興趣一年只集中一門。大學選科、職業、買樓賣樓、投票、自己參選，都是這個人自己的事。投票不用錢。自己參選要付選舉開支。</li>
-            <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋。主席薪酬要先買回股票。</li>
-            <li>出生時個人資金是零。父母會養。童工、兼職、後來的職業，錢進個人資金。股票不會自動發薪酬。</li>
+            <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
+            <li>出生時個人資金是零，負債也是零。父母會養日常。童工、兼職、後來的職業，錢進個人資金。自己要花的錢如果不夠，差額記成負債。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
             <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
@@ -902,7 +902,7 @@ function SpendColumn({
         {life.statusNote || "興趣一年一門。走路和去公園不用錢。"}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
-        零工和投資其他公司，每一格一筆。錢不夠的按不下去。去打零工可以先由家裡墊。
+        零工和投資其他公司，每一格一筆。錢不夠會記成負債，不會辦不成。
       </p>
       {hobbies.length === 0 && jobs.length === 0 && investments.length === 0 ? (
         <p className="mt-4 text-sm text-muted">還小，興趣要再大一點。</p>
@@ -934,6 +934,7 @@ function SpendColumn({
                 <span className="block">賣掉房子</span>
                 <span className="block text-xs text-muted">
                   {equity > 1 ? `進帳 ${formatMoney(equity)} ${ccy}` : "賣了沒有進帳"}
+                  {(life.debt ?? 0) > 1 && equity > 1 ? " · 先還負債" : ""}
                   {traded ? " · 今年已買賣過" : ""}
                 </span>
               </button>
@@ -941,14 +942,14 @@ function SpendColumn({
               <>
                 <HouseButton
                   label="付三成買樓"
-                  sub={`扣 ${formatMoney(down)} ${ccy}`}
-                  disabled={traded || life.purse + 0.5 < down}
+                  sub={`扣 ${formatMoney(down)} ${ccy}${life.purse + 0.5 < down ? " · 不夠記成負債" : ""}`}
+                  disabled={traded}
                   onClick={() => onBuyHome("mortgage")}
                 />
                 <HouseButton
                   label="一次過付清"
-                  sub={`扣 ${formatMoney(home)} ${ccy}`}
-                  disabled={traded || life.purse + 0.5 < home}
+                  sub={`扣 ${formatMoney(home)} ${ccy}${life.purse + 0.5 < home ? " · 不夠記成負債" : ""}`}
+                  disabled={traded}
                   onClick={() => onBuyHome("cash")}
                 />
               </>
@@ -968,8 +969,8 @@ function SpendColumn({
             ) : (
               <HouseButton
                 label="買回股票，出任主席"
-                sub={`扣 ${formatMoney(chair)} ${ccy}`}
-                disabled={life.purse + 0.5 < chair}
+                sub={`扣 ${formatMoney(chair)} ${ccy}${life.purse + 0.5 < chair ? " · 不夠記成負債" : ""}`}
+                disabled={false}
                 onClick={onChair}
               />
             )}
@@ -1035,6 +1036,7 @@ function SpendRow({
           const workOn = Boolean(item.work && life.work === item.work);
           const cost = item.usd * fx;
           const chance = item.invest ? Math.round(investChance(life, item.invest.lean) * 100) : null;
+          const short = cost > 0.5 && (life.purse ?? 0) + 0.5 < cost;
           const sub = hobbyOn
             ? "今年集中"
             : lockedOut
@@ -1042,8 +1044,8 @@ function SpendRow({
               : item.usd <= 0
                 ? "不用錢"
                 : chance !== null
-                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%`
-                  : `扣 ${formatMoney(cost)} ${ccy}`;
+                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%${short ? " · 不夠記成負債" : ""}`
+                  : `扣 ${formatMoney(cost)} ${ccy}${short ? " · 不夠記成負債" : ""}`;
           return (
             <button
               key={item.id}
@@ -1155,6 +1157,9 @@ function Play({
               <p className="text-xs text-muted">個人資金</p>
               <p className="font-mono text-3xl sm:text-4xl">{(life.purse ?? 0) > 0 ? formatCompact(life.purse) : "0"}</p>
               <p className="text-xs text-muted">{market.ccy}</p>
+              {(life.debt ?? 0) > 1 && (
+                <p className="mt-1 font-mono text-sm text-ivory">負債 {formatMoney(life.debt ?? 0)} {market.ccy}</p>
+              )}
               <p className="mt-1 text-sm text-muted">
                 {life.chairman
                   ? `主席薪酬 ${formatCompact(life.salary)} 入個人資金`
@@ -1228,9 +1233,9 @@ function Play({
               const wage = (choice.jobUsd ?? 0) * market.fx;
               const money =
                 moneyLine.cost > 0
-                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}`
+                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}${(life.purse ?? 0) + 0.5 < moneyLine.cost ? " · 不夠記成負債" : ""}`
                   : moneyLine.gain > 0
-                    ? `進帳 ${formatMoney(moneyLine.gain)} ${market.ccy}`
+                    ? `進帳 ${formatMoney(moneyLine.gain)} ${market.ccy}${(life.debt ?? 0) > 1 ? " · 先還負債" : ""}`
                     : wage > 0
                       ? `職業每年 ${formatMoney(wage)} ${market.ccy}`
                       : "";

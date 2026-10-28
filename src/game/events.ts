@@ -107,7 +107,7 @@ export const EVENTS: GameEvent[] = [
     id: "eighteen",
     anchorAge: 18,
     title: "大學選科",
-    body: "{year}年，{name}十八歲。{headline}。讀不讀、讀哪一科，學費從個人資金扣。這筆錢跟股票無關。付不起就不會註冊。",
+    body: "{year}年，{name}十八歲。{headline}。讀不讀、讀哪一科，學費從個人資金扣。這筆錢跟股票無關。不夠的差額記成負債。",
     choices: [
       {
         label: "讀商科",
@@ -250,7 +250,7 @@ export const EVENTS: GameEvent[] = [
     anchorAge: 30,
     when: (life) => !life.flags.home,
     title: "要不要買房子",
-    body: "{year}年，{country}。{headline}。樓價從個人資金扣。付三成之後每年還要供。付不起就繼續租，不會硬扣。",
+    body: "{year}年，{country}。{headline}。樓價從個人資金扣。付三成之後每年還要供。不夠的差額記成負債。",
     choices: [
       {
         label: "付三成，其餘按揭",
