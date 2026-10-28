@@ -25,6 +25,10 @@ export function formatPrice(n: number): string {
   });
 }
 
+export function formatMoney(n: number): string {
+  return Math.round(Math.max(0, n)).toLocaleString("zh-HK");
+}
+
 export function formatCompact(n: number): string {
   const sign = n < 0 ? "-" : "";
   const a = Math.abs(n);

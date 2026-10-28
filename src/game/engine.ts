@@ -1,11 +1,12 @@
 import { TIER_ORDER, countryById, pickCountryByBirth } from "@/game/countries";
 import { eventById, EVENTS } from "@/game/events";
-import { capUsd, priceUsd } from "@/game/format";
+import { capUsd, formatMoney, priceUsd } from "@/game/format";
 import { mortalityQx, naturalCause } from "@/game/mortality";
 import { familyLine, personName, reticker, tickerOf } from "@/game/names";
 import { POLICY_VOL, policyById, policyFits } from "@/game/policies";
 import {
   describeMove,
+  investChance,
   policyNudge,
   policyShiftLine,
   invertDelta,
@@ -505,6 +506,34 @@ function tickStats(life: Life) {
   life.kin = clamp(life.kin + (kinTarget - life.kin) * pull + jitter(), 0, 100);
   life.social = clamp(life.social + (socialTarget - life.social) * pull + jitter(), 0, 100);
   life.reputation = clamp(life.reputation + (repTarget - life.reputation) * pull + jitter() * 0.55, 0, 100);
+  const hobby = life.hobby ? spendById(life.hobby) : undefined;
+  if (hobby?.group === "hobby") {
+    const drip = resolveDelta(life.policy, hobby);
+    const keep = 0.12;
+    life.mind = clamp(life.mind + drip.mind * keep, 0, 100);
+    life.health = clamp(life.health + drip.health * keep, 0, 100);
+    life.kin = clamp(life.kin + drip.kin * keep, 0, 100);
+    life.social = clamp(life.social + drip.social * keep, 0, 100);
+    life.human = clamp(life.human + drip.human * keep, 0, 100);
+    life.reputation = clamp(life.reputation + drip.reputation * keep, 0, 100);
+  }
+}
+
+function choiceSamples(life: Life, exposure: Exposure): number[] {
+  if (exposure === "health") return [life.health, life.mind];
+  if (exposure === "human" || exposure === "career") return [life.human, life.mind, life.health];
+  if (exposure === "cash") return [life.mind, life.kin];
+  if (exposure === "leverage" || exposure === "venture") return [life.mind, life.human, life.reputation];
+  if (exposure === "diversify") return [life.social, life.mind, life.kin];
+  if (exposure === "real") return [life.kin, life.health, life.mind];
+  return [life.mind, life.health, life.kin, life.social];
+}
+
+/** Success odds for a major choice. Higher when the bars that choice leans on are healthier. */
+export function choiceChance(life: Life, choice: ChoiceDef): number {
+  const samples = choiceSamples(life, choice.exposure);
+  const avg = samples.reduce((sum, n) => sum + n, 0) / samples.length;
+  return clamp(0.16 + (avg / 100) * 0.76, 0.12, 0.93);
 }
 
 function statusRevalue(before: number, after: number): number {
@@ -666,14 +695,21 @@ function applyChoice(life: Life, index: number): Report | null {
     margin = true;
   }
   const sharePct = choice.shares ?? 0;
-  life.health = clamp(life.health + (choice.health ?? 0), 0, 100);
-  life.human = clamp(life.human + (choice.human ?? 0), 0, 100);
-  life.reputation = clamp(life.reputation + (choice.reputation ?? 0), 0, 100);
-  life.mind = clamp(life.mind + (choice.mind ?? 0), 0, 100);
-  life.kin = clamp(life.kin + (choice.kin ?? 0), 0, 100);
-  life.social = clamp(life.social + (choice.social ?? 0), 0, 100);
-  life.leverage = clamp(life.leverage + (choice.leverage ?? 0), 0, 0.94);
-  if (choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
+  const chance = choiceChance(life, choice);
+  const succeeded = draw(life) < chance;
+  const tilt = (n?: number) => {
+    const value = n ?? 0;
+    if (succeeded || value <= 0) return value;
+    return -Math.max(1, Math.round(value * 0.45));
+  };
+  life.health = clamp(life.health + tilt(choice.health), 0, 100);
+  life.human = clamp(life.human + tilt(choice.human), 0, 100);
+  life.reputation = clamp(life.reputation + tilt(choice.reputation), 0, 100);
+  life.mind = clamp(life.mind + tilt(choice.mind), 0, 100);
+  life.kin = clamp(life.kin + tilt(choice.kin), 0, 100);
+  life.social = clamp(life.social + tilt(choice.social), 0, 100);
+  life.leverage = clamp(life.leverage + (succeeded ? (choice.leverage ?? 0) : Math.min(0, choice.leverage ?? 0)), 0, 0.94);
+  if (succeeded && choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
   tickStats(life);
   const revalue = statusRevalue(scoreBefore, lifeScore(life));
   const fit = policyFit(life);
@@ -683,8 +719,9 @@ function applyChoice(life: Life, index: number): Report | null {
   } else {
     pricePct = pricePct * (0.65 + Math.min(fit, 1.8) * 0.4) + revalue;
   }
-  pricePct = clamp(pricePct, -0.72, appropriate ? 0.95 : 0);
-  movePrice(life, pricePct, sharePct);
+  pricePct = clamp(pricePct, -0.72, appropriate && succeeded ? 0.95 : 0);
+  if (!succeeded) pricePct = Math.min(pricePct, -0.01);
+  movePrice(life, pricePct, succeeded ? sharePct : Math.min(0, sharePct));
   const economic = life.price / priceBefore - 1;
   const bits = [
     appropriate
@@ -692,17 +729,17 @@ function applyChoice(life: Life, index: number): Report | null {
       : `基本政策不合這段「${plan.regimeName}」，股價沒有被推上去，結果 ${signed(economic)}`,
   ];
   if (bust) bits.push("對手方倒了，這筆變成虧損");
+  if (!succeeded) bits.push("這一步沒成");
   if (margin) bits.push("槓桿觸發追繳");
   if (sharePct > 0.02) bits.push("流通股增發，每股被攤薄");
   if (sharePct < -0.02) bits.push("公司回購了一部分");
   plan.explanation = `${plan.explanation ?? ""}${bits.join("。")}。`;
   plan.sharePct = sharePct;
   plan.title = event.title;
-  plan.detail = choice.label;
   plan.hadChoice = true;
   if (event.repeat) life.cool = { ...(life.cool ?? {}), [event.id]: plan.year };
   else if (!life.used.includes(event.id)) life.used.push(event.id);
-  if (choice.relist) {
+  if (succeeded && choice.relist) {
     const target = resolveRelist(life, choice.relist);
     if (target) {
       const fromName = countryById(life.countryId).name;
@@ -711,32 +748,46 @@ function applyChoice(life: Life, index: number): Report | null {
       plan.explanation += `已從${fromName}轉板至${countryById(target).name}。美元股價連續，之後的死亡率改按當地計算。`;
     }
   }
-  if (choice.sideUsd !== undefined) {
+  if (choice.sideUsd !== undefined && (succeeded || choice.sideUsd === 0)) {
     life.side = Math.max(0, choice.sideUsd * countryById(life.countryId).fx);
   }
   life.slot = plan.pendingSlot ?? (life.slot ?? 0) + 1;
   accrueSlot(life);
   const fx = countryById(life.countryId).fx;
-  if (choice.gainUsd) life.purse += choice.gainUsd * fx;
+  const ccy = countryById(life.countryId).ccy;
+  const money: string[] = [];
+  if (succeeded && choice.gainUsd) {
+    const gained = choice.gainUsd * fx;
+    life.purse += gained;
+    money.push(`個人資金進了 ${formatMoney(gained)} ${ccy}`);
+  }
   if (choice.spendUsd && choice.spendUsd > 0) {
     const cost = choice.spendUsd * fx;
+    const paid = Math.min(life.purse, cost);
     if (life.purse >= cost) life.purse -= cost;
     else {
       life.purse = 0;
       life.kin = clamp(life.kin - 4, 0, 100);
       life.mind = clamp(life.mind - 3, 0, 100);
     }
+    money.push(
+      paid + 0.5 >= cost
+        ? `個人資金扣了 ${formatMoney(paid)} ${ccy}`
+        : `這筆要 ${formatMoney(cost)} ${ccy}，個人資金只扣到見底，扣了 ${formatMoney(paid)} ${ccy}`,
+    );
   }
+  const outcome = `${choice.label}。${succeeded ? "成了" : "沒成"}`;
+  plan.detail = money.length > 0 ? `${outcome}。${money.join("。")}` : outcome;
   plan.eventId = null;
   plan.committed = true;
   plan.pendingSlot = null;
-  remember(life, choice.label);
+  remember(life, plan.detail);
   pushPrint(life);
   life.log.push({
     age: life.age,
     year: plan.year,
     title: event.title,
-    detail: choice.label,
+    detail: plan.detail,
   });
   const hazard = choice.hazard ?? 0;
   if (hazard > 0 && choice.cause && draw(life) < hazard) return kill(life, choice.cause);
@@ -887,15 +938,17 @@ export function setPolicy(life: Life, policy: PolicyId): Life {
   return next;
 }
 
-/** Spend purse on a hobby or a kind of work. One action per cell. Does not advance the clock. */
+/** Spend purse on a hobby, a kind of work, or a personal investment. Hobbies keep running after they are paid for. */
 export function spend(source: Life, id: string): Life {
   const item = spendById(id);
   if (!item || !source.alive || !source.plan) return source;
   if (source.age < item.minAge) return source;
   if (item.maxAge !== undefined && source.age > item.maxAge) return source;
+  if (item.group === "hobby" && source.hobby === item.id) return source;
   const key = spendCellKey(source);
-  if ((source.spentKey ?? "") === key) return source;
+  if (item.group !== "hobby" && (source.spentKey ?? "") === key) return source;
   const fx = countryById(source.countryId).fx;
+  const ccy = countryById(source.countryId).ccy;
   const cost = item.usd * fx;
   const short = (source.purse ?? 0) < cost;
   if (short && !item.stake) return source;
@@ -904,12 +957,30 @@ export function spend(source: Life, id: string): Life {
   const before = snapStats(life);
   const beforeScore = lifeScore(life);
   const delta = resolveDelta(life.policy, item);
+  const paid = short ? life.purse : cost;
   if (short) {
     life.purse = 0;
     delta.kin -= 4;
     delta.mind -= 3;
   } else {
     life.purse = Math.max(0, life.purse - cost);
+  }
+  let back = 0;
+  let invested: boolean | null = null;
+  if (item.invest && !short) {
+    invested = draw(life) < investChance(life, item.invest.lean);
+    back = invested ? paid * item.invest.win : paid * (1 - item.invest.lose);
+    life.purse += back;
+    if (!invested && item.invest.lean === "bond") {
+      delta.kin -= 3;
+      delta.mind -= 2;
+    }
+    if (!invested && item.invest.lean === "nerve") {
+      delta.mind -= 2;
+      delta.reputation -= 1;
+    }
+    if (!invested && item.invest.lean === "skill") delta.mind -= 2;
+    if (invested && (item.invest.lean === "skill" || item.invest.lean === "nerve")) delta.reputation += 2;
   }
   applyDelta(life, delta);
   const revalue = statusRevalue(beforeScore, lifeScore(life));
@@ -920,15 +991,27 @@ export function spend(source: Life, id: string): Life {
   if (item.ease) life.side = Math.max(0, life.side * 0.45);
   else if (item.sideUsd !== undefined) life.side = Math.max(0, item.sideUsd * fx);
   if (item.work) life.work = item.work;
-  life.spentKey = key;
-  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : undefined;
-  const note = describeMove(item.label, before, snapStats(life), short, tail);
+  if (item.group === "hobby") life.hobby = item.id;
+  if (item.group !== "hobby") life.spentKey = key;
+  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : item.group === "hobby" ? "這門興趣會一直帶著" : undefined;
+  let note = describeMove(item.label, before, snapStats(life), short, tail);
+  if (item.invest && invested !== null) {
+    note = invested
+      ? `個人資金扣了 ${formatMoney(paid)} ${ccy}。${item.label}成了，回到 ${formatMoney(back)} ${ccy}。`
+      : back < 1
+        ? `個人資金扣了 ${formatMoney(paid)} ${ccy}。${item.label}沒成，這筆沒有回來。`
+        : `個人資金扣了 ${formatMoney(paid)} ${ccy}。${item.label}沒成，回來 ${formatMoney(back)} ${ccy}。`;
+  } else if (short) {
+    note = `${note}這筆要 ${formatMoney(cost)} ${ccy}，個人資金扣了 ${formatMoney(paid)} ${ccy}，其餘由家裡墊了。`;
+  } else {
+    note = `${note}個人資金扣了 ${formatMoney(paid)} ${ccy}。`;
+  }
   life.statusNote = note;
   remember(life, note);
   life.log.push({
     age: life.age,
     year: life.plan?.year ?? life.birthYear + life.age,
-    title: "個人花錢",
+    title: item.group === "invest" ? "個人投資" : "個人花錢",
     detail: note,
   });
   return life;

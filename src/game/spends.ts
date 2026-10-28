@@ -13,15 +13,21 @@ export type SpendId =
   | "craft"
   | "night"
   | "stall"
-  | "ease";
+  | "ease"
+  | "deposit"
+  | "index"
+  | "stake"
+  | "lend";
+
+export type InvestLean = "calm" | "skill" | "nerve" | "bond";
 
 export interface SpendDef {
   id: SpendId;
-  group: "hobby" | "work";
+  group: "hobby" | "work" | "invest";
   label: string;
   minAge: number;
   maxAge?: number;
-  /** Cost in USD, charged in local currency. Not shown on the button. */
+  /** Cost in USD, charged in local currency. Shown as an amount, not a formula. */
   usd: number;
   /** Entry work can be fronted by the family when the purse is short. */
   stake?: boolean;
@@ -30,6 +36,8 @@ export interface SpendDef {
   /** Lighten whatever work is already there. */
   ease?: boolean;
   work?: string;
+  /** If set, the stake can come back or be lost. Chance follows status bars. */
+  invest?: { lean: InvestLean; win: number; lose: number };
   base: StatDelta;
 }
 
@@ -103,6 +111,42 @@ export const SPENDS: SpendDef[] = [
     work: "light",
     base: bars(3, 4, 1, 0, -1, 0),
   },
+  {
+    id: "deposit",
+    group: "invest",
+    label: "放一筆定存",
+    minAge: 15,
+    usd: 500,
+    invest: { lean: "calm", win: 1.08, lose: 0.04 },
+    base: bars(1, 0, 1, 0, 0, 0),
+  },
+  {
+    id: "index",
+    group: "invest",
+    label: "買進指數",
+    minAge: 16,
+    usd: 800,
+    invest: { lean: "skill", win: 1.5, lose: 0.75 },
+    base: bars(-1, 0, 0, 0, 1, 0),
+  },
+  {
+    id: "stake",
+    group: "invest",
+    label: "加碼自己的事",
+    minAge: 18,
+    usd: 1000,
+    invest: { lean: "nerve", win: 1.9, lose: 1 },
+    base: bars(-1, 0, 0, 0, 1, 1),
+  },
+  {
+    id: "lend",
+    group: "invest",
+    label: "借給熟人",
+    minAge: 16,
+    usd: 300,
+    invest: { lean: "bond", win: 1.3, lose: 1 },
+    base: bars(0, 0, 1, 1, 0, 0),
+  },
 ];
 
 export function spendById(id: string): SpendDef | undefined {
@@ -127,13 +171,36 @@ export function spendVisible(item: SpendDef, age: number): boolean {
 
 export function spendOpen(
   item: SpendDef,
-  life: { age: number; purse?: number; spentKey?: string; slot?: number; plan?: { eventId?: string | null; committed?: boolean; pendingSlot?: number | null } | null },
+  life: {
+    age: number;
+    purse?: number;
+    spentKey?: string;
+    hobby?: string;
+    slot?: number;
+    plan?: { eventId?: string | null; committed?: boolean; pendingSlot?: number | null } | null;
+  },
   fx: number,
 ): boolean {
   if (!spendVisible(item, life.age)) return false;
-  if ((life.spentKey ?? "") === spendCellKey(life)) return false;
+  if (item.group === "hobby" && life.hobby === item.id) return true;
+  if (item.group !== "hobby" && (life.spentKey ?? "") === spendCellKey(life)) return false;
   if (!item.stake && (life.purse ?? 0) < item.usd * fx) return false;
   return true;
+}
+
+export function investChance(
+  stats: { mind: number; health: number; human: number; kin: number; social: number; reputation: number },
+  lean: InvestLean,
+): number {
+  const avg =
+    lean === "calm"
+      ? (stats.mind + stats.kin) / 2
+      : lean === "skill"
+        ? (stats.mind + stats.human + stats.health) / 3
+        : lean === "nerve"
+          ? (stats.mind + stats.human + stats.reputation) / 3
+          : (stats.kin + stats.social + stats.mind) / 3;
+  return Math.min(0.9, Math.max(0.15, 0.18 + (avg / 100) * 0.72));
 }
 
 export function policyMood(id: PolicyId): string {

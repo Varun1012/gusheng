@@ -132,6 +132,8 @@ export interface Life {
   side: number;
   /** Kind of work the purse was last spent on. */
   work?: string;
+  /** Hobby that keeps affecting status after it is paid for. */
+  hobby?: string;
   /** Plain line for the latest spend or policy shift. No formula. */
   statusNote?: string;
   /** Age:cell that already spent. One purse action per cell. */
