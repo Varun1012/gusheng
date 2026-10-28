@@ -1,5 +1,6 @@
 import type { Life, Report } from "@/game/types";
 import { quotedHome } from "@/game/engine";
+import { hydrateHousehold } from "@/game/household";
 
 const SNAP = "gusheng.snap.v1";
 const BOARD = "gusheng.board.v1";
@@ -46,6 +47,7 @@ export function loadSnap(): Snap | null {
     life.homeDebt ??= 0;
     life.houseYear ??= 0;
     if (life.flags) life.flags.office ??= false;
+    hydrateHousehold(life);
     if (life.flags?.home && !(life.homeValue > 0)) {
       life.homeValue = quotedHome(life);
       life.homeDebt ??= 0;

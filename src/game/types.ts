@@ -35,6 +35,29 @@ export interface Flags {
   office?: boolean;
 }
 
+export type KinRole = "father" | "mother" | "sibling" | "spouse" | "child";
+
+/** One person in the household. Alive or not is explicit. */
+export interface Kin {
+  role: KinRole;
+  /** 父、母、兄、姐、配偶、子、女 */
+  tag: string;
+  name: string;
+  born: number;
+  died?: number;
+  alive: boolean;
+  /** Spouse who left, but is still alive. */
+  apart?: boolean;
+  /** What they do, or how they are related. Not a formula. */
+  note: string;
+}
+
+export interface Cycle {
+  id: RegimeId;
+  /** Age when this phase ends and another is drawn. */
+  untilAge: number;
+}
+
 export interface HistPoint {
   age: number;
   year: number;
@@ -171,6 +194,12 @@ export interface Life {
   policy: PolicyId;
   tier: TierId;
   family: string;
+  /** Parents, siblings, spouse, children. Older saves omit this. */
+  household?: Kin[];
+  /** This life's market phase. Not the historical calendar. */
+  cycle?: Cycle;
+  /** Short aftershock still pulling the price. */
+  echo?: { left: number; drift: number };
   flags: Flags;
   used: string[];
   history: HistPoint[];

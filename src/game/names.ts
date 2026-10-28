@@ -48,6 +48,18 @@ export function personName(countryId: string, rng: () => number): string {
   return pick(rng, CN_SUR) + pick(rng, CN_GIVEN);
 }
 
+/** A child's name. Shares the family name where the culture puts it first or last. */
+export function childName(countryId: string, parentName: string, rng: () => number): string {
+  const full = personName(countryId, rng);
+  if (countryId === "jp") return parentName.slice(0, 2) + full.slice(2);
+  if (countryId === "kr") return parentName.slice(0, 1) + full.slice(1);
+  const latin = full.includes(" ");
+  if (!latin) return parentName.slice(0, 1) + full.slice(1);
+  const last = parentName.split(" ").slice(-1)[0] ?? parentName;
+  const first = full.split(" ")[0] ?? full;
+  return `${first} ${last}`;
+}
+
 const FAMILY: Record<TierId, string[]> = {
   destitute: [
     "父母打散工，家裡沒有多餘的一頓",

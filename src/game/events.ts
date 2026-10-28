@@ -1,5 +1,7 @@
 import type { ChoiceDef, GameEvent } from "@/game/event-types";
+import { childCount } from "@/game/household";
 import { PERSONAL_EVENTS } from "@/game/personal-events";
+import { SHOCK_EVENTS } from "@/game/shock-events";
 
 export type { ChoiceDef, GameEvent };
 
@@ -472,7 +474,7 @@ export const EVENTS: GameEvent[] = [
     when: (life) => !life.flags.married,
     weight: 1.6,
     title: "有人提議合併報表",
-    body: "對方的家族、職業與債務，都會進你的市值。{year}年，{regime}。",
+    body: "若結成，對方的名字和年紀會列進家庭。以後在世或離世，也寫在那一欄。",
     choices: [
       {
         label: "結婚，家庭一起擴表",
@@ -510,7 +512,7 @@ export const EVENTS: GameEvent[] = [
     when: (life) => !life.flags.children,
     weight: 1.5,
     title: "要不要新增一個小股東",
-    body: "孩子會攤薄你的時間，也可能在很久以後成為你沒買到的那隻成長股。",
+    body: "若有了孩子，會有自己的名字，列在家庭裡，並寫明在世還是離世。",
     choices: [
       {
         label: "要，並把生活重新定價",
@@ -538,6 +540,39 @@ export const EVENTS: GameEvent[] = [
         exposure: "career",
         price: 0.09,
         human: 2,
+      },
+    ],
+  },
+  {
+    id: "another_child",
+    facet: "kin",
+    major: true,
+    repeat: true,
+    cooldown: 4,
+    minAge: 27,
+    maxAge: 44,
+    weight: 1.25,
+    when: (life) => life.flags.children && childCount(life) < 3,
+    title: "還要不要再一個孩子",
+    body: "家裡已經有孩子。再一個，就再多一個名字。在世或離世都會寫清楚。",
+    choices: [
+      {
+        label: "再生一個",
+        detail: "時間再分出去",
+        exposure: "health",
+        price: 0.05,
+        health: -2,
+        kin: 4,
+        mind: -1,
+        setFlags: { children: true },
+      },
+      {
+        label: "就這樣",
+        detail: "現有的孩子先顧好",
+        exposure: "cash",
+        price: 0.04,
+        kin: 2,
+        mind: 2,
       },
     ],
   },
@@ -1744,6 +1779,7 @@ export const EVENTS: GameEvent[] = [
       },
     ],
   },
+  ...SHOCK_EVENTS,
   ...PERSONAL_EVENTS,
 ];
 

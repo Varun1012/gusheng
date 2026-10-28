@@ -61,7 +61,7 @@ import {
 } from "@/game/music";
 import { tierLabel } from "@/game/names";
 import { POLICIES, type Policy } from "@/game/policies";
-import { regimeFor } from "@/game/regimes";
+import { REGIME_NAME, cycleBlurb } from "@/game/regimes";
 import { policyMood, SPENDS, investChance, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
 import type { BirthInput, HistPoint, Life, PolicyId, Report } from "@/game/types";
@@ -698,7 +698,8 @@ function Title({
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
             <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏，滿足度也跟著偏。</li>
-            <li>股價跟著滿足度走。市場冷暖只是背景，不跟某一年的新聞對時。</li>
+            <li>股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。遇上經濟大事，價格會先重重晃一下，再收回一部分。</li>
+            <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
             <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>興趣一年只集中一門。大學選科、職業、買樓賣樓、投票、自己參選，都是這個人自己的事。投票不用錢。自己參選要付選舉開支。</li>
             <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋。主席薪酬要先買回股票。</li>
@@ -785,7 +786,7 @@ function Birth({
   onStart: () => void;
 }) {
   const market = countryById(life.countryId);
-  const regime = regimeFor(life.birthYear, life.countryId);
+  const cycleId = life.cycle?.id ?? "expansion";
   const q = previewMortality(life);
   return (
     <section className="grid gap-4 lg:grid-cols-5">
@@ -802,8 +803,11 @@ function Birth({
           {market.exchange} · {life.birthYear}年 · {tierLabel(life.tier)}
         </p>
         <p className="mt-2 text-sm leading-relaxed">{life.family}</p>
+        <div className="mt-3">
+          <FamilyBoard life={life} story={false} />
+        </div>
         <p className="mt-3 text-sm text-muted">
-          出生那年：{regime.name}。{regime.headline}
+          出生那年的市道：{REGIME_NAME[cycleId]}。{cycleBlurb(cycleId, life.seed + life.birthYear)}
         </p>
         <p className="mt-2 text-sm text-ivory">
           {life.name} 出生時個人資金是 0。父母會養。股價跟著這個人的滿足度走，不跟著一份自動發下來的薪酬。
@@ -1188,10 +1192,12 @@ function Play({
             <Meter label="社會" value={life.social ?? 50} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted">
-            股價跟著滿足度走。有房子、有職業、今年有一門興趣，人會比較滿足。轉差會壓低股價。
+            股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。遇上大事，價格會先重重晃一下。
           </p>
         </div>
       </div>
+
+      <FamilyBoard life={life} />
 
       <div>
         <p className="mb-2 text-sm text-muted">基本政策</p>
@@ -1293,6 +1299,45 @@ function Play({
   );
 }
 
+function FamilyBoard({ life, story = true }: { life: Life; story?: boolean }) {
+  const year = life.deathYear ?? life.plan?.year ?? life.birthYear + life.age;
+  const order = { father: 0, mother: 1, sibling: 2, spouse: 3, child: 4 };
+  const people = [...(life.household ?? [])].sort((a, b) => order[a.role] - order[b.role] || a.born - b.born);
+  if (people.length === 0) return null;
+  const living = people.filter((person) => person.alive).length;
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm text-muted">家庭</p>
+        <p className="text-xs text-muted">
+          在世 {living} · 離世 {people.length - living}
+        </p>
+      </div>
+      {story && life.family ? <p className="mt-1 text-sm leading-relaxed">{life.family}</p> : null}
+      <ul className="mt-1 divide-y divide-line">
+        {people.map((person, index) => {
+          const age = person.alive ? year - person.born : (person.died ?? year) - person.born;
+          const ageText = age <= 0 ? "未滿一歲" : person.alive ? `${age}歲` : `享年 ${age}`;
+          const state = !person.alive ? "離世" : person.apart ? "分開 · 在世" : "在世";
+          return (
+            <li key={`${person.role}-${person.name}-${person.born}-${index}`} className="flex items-baseline justify-between gap-3 py-2">
+              <span className="min-w-0">
+                <span className="text-sm text-ivory">
+                  {person.tag} · {person.name}
+                </span>
+                <span className="mt-0.5 block text-xs text-muted">{person.note}</span>
+              </span>
+              <span className={"shrink-0 text-xs " + (person.alive && !person.apart ? "text-gold" : "text-muted")}>
+                {state} · {ageText}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function Log({ life }: { life: Life }) {
   const rows = [...life.log].reverse();
   return (
@@ -1354,6 +1399,9 @@ function Dead({
         <div className="lg:col-span-3">
           <p className="max-w-xl text-base leading-relaxed text-muted">{epi.text}</p>
           <p className="mt-3 text-sm">死因：{life.cause ?? "未知"}</p>
+          <div className="mt-4">
+            <FamilyBoard life={life} />
+          </div>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row">
             <button type="button" onClick={onAgain} className="min-h-11 rounded-xl bg-gold px-4 py-3 font-medium text-ink">
               再投胎

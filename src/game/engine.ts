@@ -1,8 +1,9 @@
 import { TIER_ORDER, countryById, pickCountryByBirth } from "@/game/countries";
 import { eventById, EVENTS } from "@/game/events";
 import { capUsd, formatMoney, priceUsd } from "@/game/format";
+import { ageHousehold, attachChild, attachSpouse, partSpouse, seedHousehold } from "@/game/household";
 import { mortalityQx, naturalCause } from "@/game/mortality";
-import { familyLine, personName, reticker, tickerOf } from "@/game/names";
+import { childName, familyLine, personName, reticker, tickerOf } from "@/game/names";
 import { POLICY_VOL, policyById, policyFits } from "@/game/policies";
 import {
   describeMove,
@@ -14,7 +15,7 @@ import {
   spendById,
   spendCellKey,
 } from "@/game/spends";
-import { REGIME_DRIFT, REGIME_SCALAR, regimeFor } from "@/game/regimes";
+import { REGIME_DRIFT, REGIME_SCALAR, syncCycle } from "@/game/regimes";
 import type { ChoiceDef } from "@/game/event-types";
 import type { BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId, YearPlan } from "@/game/types";
 
@@ -79,6 +80,9 @@ function copy(life: Life): Life {
     history: [...life.history],
     log: [...life.log],
     origin: { ...life.origin },
+    household: life.household?.map((person) => ({ ...person })),
+    cycle: life.cycle ? { ...life.cycle } : undefined,
+    echo: life.echo ? { ...life.echo } : undefined,
     plan: life.plan
       ? {
           ...life.plan,
@@ -227,9 +231,17 @@ export function createLife(input: BirthInput = {}): Life {
   life.cool = {};
   life.leverage = clamp(0.04 + draw(life) * 0.08, 0, 0.3);
   life.policy = stats.policy;
-  life.name = personName(life.countryId, () => draw(life));
+  life.household = seedHousehold(life, () => draw(life));
+  const father = life.household.find((person) => person.role === "father");
+  const taken = new Set(life.household.map((person) => person.name));
+  let name = father ? childName(life.countryId, father.name, () => draw(life)) : personName(life.countryId, () => draw(life));
+  for (let i = 0; i < 6 && taken.has(name); i += 1) {
+    name = father ? childName(life.countryId, father.name, () => draw(life)) : personName(life.countryId, () => draw(life));
+  }
+  life.name = name;
   life.ticker = tickerOf(life.countryId, life.name, () => draw(life));
   life.family = familyLine(life.countryId, tier, () => draw(life));
+  syncCycle(life, () => draw(life));
   const year = life.birthYear;
   life.history.push({
     age: 0,
@@ -302,7 +314,7 @@ export function beginYear(life: Life): Life {
   const next = copy(life);
   if (next.plan && next.plan.slotMode === "cell" && next.plan.age === next.age) return next;
   const year = next.birthYear + next.age;
-  const regime = regimeFor(year, next.countryId);
+  const regime = syncCycle(next, () => draw(next));
   const payNote = reviewPay(next);
   next.slot = 0;
   next.plan = {
@@ -499,6 +511,11 @@ export function satisfaction(life: Life): number {
   const year = life.plan?.year ?? life.birthYear + life.age;
   if (life.hobby && life.hobbyYear === year) score += 3;
   if (life.flags.office) score += 3;
+  const home = life.household ?? [];
+  if (home.some((person) => person.role === "spouse" && person.alive && !person.apart)) score += 3;
+  score += Math.min(3, home.filter((person) => person.role === "child" && person.alive).length);
+  const parents = home.filter((person) => person.role === "father" || person.role === "mother");
+  if (life.age < 28 && parents.length > 0 && parents.every((person) => !person.alive)) score -= 4;
   if (life.age >= 23 && !life.career && (life.job ?? 0) <= 0 && (life.side ?? 0) <= 0 && !life.chairman) score -= 8;
   return clamp(score, 0, 100);
 }
@@ -711,23 +728,50 @@ function kill(life: Life, cause: string): Report {
   return report;
 }
 
+function cycleKick(life: Life): number {
+  const id = life.plan?.regimeId ?? life.cycle?.id ?? "expansion";
+  const amp =
+    id === "crisis" ? 0.072 : id === "bubble" ? 0.06 : id === "recession" || id === "tightening" ? 0.046 : id === "recovery" ? 0.038 : 0.032;
+  const bias =
+    id === "crisis" ? -0.02 : id === "recession" ? -0.012 : id === "tightening" || id === "stagflation" ? -0.008 : id === "deflation" ? -0.004 : id === "bubble" ? 0.014 : 0.008;
+  return bias + gauss(life) * amp;
+}
+
 function playQuietSlot(life: Life) {
   const plan = life.plan!;
   const satBefore = satisfaction(life);
   tickStats(life);
   const personal = priceFromSatisfaction(satBefore, satisfaction(life));
-  let drift = personal + slotDrift(life) * 0.15;
+  let drift = personal * 0.55 + slotDrift(life) * 0.35 + cycleKick(life);
   let title = CELL_QUIET[Math.floor(draw(life) * CELL_QUIET.length)]!;
   let shown = title;
-  if (draw(life) < 0.55) {
+  let echoDir = 0;
+  if (life.echo && life.echo.left > 0) {
+    echoDir = life.echo.drift;
+    drift += echoDir;
+    const left = life.echo.left - 1;
+    life.echo = left > 0 ? { left, drift: echoDir } : undefined;
+  }
+  if (draw(life) < 0.42) {
     const tape = TAPES[Math.floor(draw(life) * TAPES.length)]!;
-    if (tape.price <= 0 || personal >= 0) {
-      drift += tape.price * 0.35;
-      title = tape.title;
-      shown = tape.line;
+    drift += tape.price * 0.9;
+    title = tape.title;
+    shown = tape.line;
+  }
+  if (draw(life) < 0.24) {
+    const wild = plan.regimeId === "crisis" || plan.regimeId === "bubble" ? 0.1 : 0.06;
+    const gap = (draw(life) - 0.48) * wild * 2;
+    drift += gap;
+    if (Math.abs(gap) > 0.012) {
+      title = gap > 0 ? "跳空向上" : "跳空向下";
+      shown = gap > 0 ? "這一格價格先走，理由後到。" : "這一格價格先跌，街上還沒有說法。";
     }
   }
-  drift = clamp(drift, -0.08, 0.07);
+  if (Math.abs(echoDir) > 0.004) {
+    title = echoDir > 0 ? "餘波往上補" : "餘波還在壓";
+    shown = title;
+  }
+  drift = clamp(drift, -0.16, 0.14);
   movePrice(life, drift, 0);
   life.slot = (life.slot ?? 0) + 1;
   accrueSlot(life);
@@ -757,7 +801,7 @@ function applyChoice(life: Life, index: number): Report | null {
   const afford = !mustFund || life.purse + 0.5 >= due;
   const broke = mustFund && !afford;
   const scalar = REGIME_SCALAR[plan.regimeId][choice.exposure];
-  let pricePct = choice.price * scalar * 0.45;
+  let pricePct = event.shock ? (event.shockBias ?? 0) + choice.price * scalar * 0.32 : choice.price * scalar * 0.45;
   const aligned = policyById(life.policy).exposure === choice.exposure;
   const risky: Exposure[] = ["leverage", "venture", "real"];
   const hedged = (life.policy === "cash" || life.policy === "diversify") && pricePct < 0 && risky.includes(choice.exposure);
@@ -799,6 +843,9 @@ function applyChoice(life: Life, index: number): Report | null {
   life.social = clamp(life.social + tilt(choice.social), 0, 100);
   life.leverage = clamp(life.leverage + (succeeded ? (choice.leverage ?? 0) : Math.min(0, choice.leverage ?? 0)), 0, 0.94);
   if (succeeded && choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
+  if (succeeded && choice.setFlags?.married === true) attachSpouse(life, () => draw(life));
+  if (succeeded && choice.setFlags?.married === false) partSpouse(life);
+  if (succeeded && choice.setFlags?.children === true) attachChild(life, () => draw(life));
   if (choice.seekOffice) {
     if (succeeded) life.flags = { ...life.flags, office: true };
     else if (!broke) life.flags = { ...life.flags, office: false };
@@ -816,9 +863,12 @@ function applyChoice(life: Life, index: number): Report | null {
   const satNow = satisfaction(life);
   if (!broke) pricePct += priceFromSatisfaction(satBefore, satNow);
   else pricePct = 0;
-  pricePct = clamp(pricePct, -0.55, succeeded ? 0.4 : 0);
-  if (!succeeded && !broke) pricePct = Math.min(pricePct, -0.01);
+  pricePct = clamp(pricePct, -0.55, event.shock || succeeded ? 0.4 : 0);
+  if (!succeeded && !broke && !event.shock) pricePct = Math.min(pricePct, -0.01);
   movePrice(life, pricePct, succeeded ? sharePct : Math.min(0, sharePct));
+  if (event.shock && !broke && Math.abs(pricePct) > 0.02) {
+    life.echo = { left: 3, drift: clamp(-pricePct * 0.28, -0.05, 0.05) };
+  }
   const economic = life.price / priceBefore - 1;
   const bits = [`滿足度 ${Math.round(satNow)}，股價按這個改寫，結果 ${signed(economic)}`];
   if (bust) bits.push("對手方倒了，這筆變成虧損");
@@ -954,6 +1004,11 @@ function ageAYear(life: Life) {
 function closeYear(life: Life): Report {
   const plan = life.plan!;
   ageAYear(life);
+  const obit = ageHousehold(life, () => draw(life));
+  if (obit) {
+    life.statusNote = obit;
+    life.log.push({ age: life.age, year: plan.year, title: "家裡", detail: obit });
+  }
   life.price = Math.max(0.02 * countryById(life.countryId).fx, life.price);
   const report = makeReport(life, false);
   life.log.push({

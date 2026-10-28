@@ -65,5 +65,9 @@ export interface GameEvent {
   cooldown?: number;
   /** Pauses the year. Everyday frictions stay off this list. */
   major?: boolean;
+  /** A sharp economic print. Flavor may recall a real episode; the year does not. */
+  shock?: boolean;
+  /** Immediate price gap before the choice tilts it. Negative is a hit. */
+  shockBias?: number;
   when?: (life: Life) => boolean;
 }

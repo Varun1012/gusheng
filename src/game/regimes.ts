@@ -1,4 +1,4 @@
-import type { Exposure, RegimeId } from "@/game/types";
+import type { Cycle, Exposure, Life, RegimeId } from "@/game/types";
 
 export const REGIME_NAME: Record<RegimeId, string> = {
   expansion: "擴張",
@@ -333,5 +333,95 @@ export function regimeFor(year: number, countryId: string): {
     id: "expansion",
     name: REGIME_NAME.expansion,
     headline: AIR.expansion,
+  };
+}
+
+const OPENING: RegimeId[] = [
+  "expansion",
+  "expansion",
+  "expansion",
+  "recovery",
+  "recovery",
+  "recession",
+  "tightening",
+  "bubble",
+  "stagflation",
+  "deflation",
+  "crisis",
+];
+
+const NEXT: Record<RegimeId, RegimeId[]> = {
+  expansion: ["expansion", "bubble", "tightening", "stagflation", "expansion"],
+  bubble: ["crisis", "tightening", "bubble", "crisis"],
+  crisis: ["recession", "recovery", "deflation"],
+  recession: ["recovery", "deflation", "crisis", "recovery"],
+  recovery: ["expansion", "bubble", "expansion"],
+  tightening: ["recession", "expansion", "deflation", "recession"],
+  stagflation: ["recession", "tightening", "crisis"],
+  deflation: ["recovery", "recession", "expansion"],
+};
+
+const CYCLE_LINES: Record<RegimeId, string[]> = {
+  expansion: [
+    "市道偏暖。工作還找得到，人家也比較敢花錢。",
+    "訂單比前幾年厚。",
+    "就業還在，人也比較敢借、敢花。",
+  ],
+  bubble: [
+    "價格跑在收入前面。周圍的人都覺得自己看懂了。",
+    "故事比帳好看。越晚進場的人越吵。",
+    "資產互相抵押，漲本身成了理由。",
+  ],
+  recession: [
+    "訂單少了。家裡比新聞更早感覺到。",
+    "招聘先停，減價後到。",
+    "生意變薄，能拖的開支都在拖。",
+  ],
+  crisis: [
+    "信用變貴，外面很吵。家裡的帳先緊起來。",
+    "相關的東西一起跌。現金忽然比故事貴重。",
+    "有槓桿的人先被問話。",
+  ],
+  stagflation: [
+    "東西貴了，機會卻沒有一起來。",
+    "物價往上，工卻沒有一起變多。",
+    "口袋縮得比物價快。",
+  ],
+  recovery: [
+    "最壞的日子像是過去了，還沒好到可以揮霍。",
+    "訂單開始回來，人還不敢一次花完。",
+    "存活下來的舖，報價先於信心。",
+  ],
+  tightening: [
+    "借錢變得不舒服，能拖的開支都在拖。",
+    "利息抬起來，久的承諾先受傷。",
+    "新的借貸變少，舊的月供變重。",
+  ],
+  deflation: [
+    "東西便宜，人也變得不敢動。",
+    "價錢往下，大家寧願再等一等。",
+    "現金不急著出去，生意就更慢。",
+  ],
+};
+
+export function cycleBlurb(id: RegimeId, salt: number): string {
+  const lines = CYCLE_LINES[id];
+  return lines[Math.abs(salt) % lines.length] ?? lines[0]!;
+}
+
+/** Draw or keep this life's market phase. The calendar year is not the cycle. */
+export function syncCycle(life: Life, rng: () => number): { id: RegimeId; name: string; headline: string } {
+  let cycle: Cycle | undefined = life.cycle;
+  if (!cycle || life.age >= cycle.untilAge) {
+    const bag = cycle ? NEXT[cycle.id] : OPENING;
+    const id = bag[Math.floor(rng() * bag.length)] ?? "expansion";
+    const span = 2 + Math.floor(rng() * 5);
+    cycle = { id, untilAge: life.age + span };
+    life.cycle = cycle;
+  }
+  return {
+    id: cycle.id,
+    name: REGIME_NAME[cycle.id],
+    headline: cycleBlurb(cycle.id, life.seed + life.birthYear + life.age),
   };
 }
