@@ -3,7 +3,7 @@ import { eventById, EVENTS } from "@/game/events";
 import { capUsd, priceUsd } from "@/game/format";
 import { mortalityQx, naturalCause } from "@/game/mortality";
 import { familyLine, personName, reticker, tickerOf } from "@/game/names";
-import { EXPOSURE_NAME, POLICY_BETA, POLICY_VOL, policyById } from "@/game/policies";
+import { POLICY_VOL, policyById, policyFits } from "@/game/policies";
 import { REGIME_DRIFT, REGIME_SCALAR, regimeFor } from "@/game/regimes";
 import type { ChoiceDef } from "@/game/event-types";
 import type { BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId, YearPlan } from "@/game/types";
@@ -414,21 +414,103 @@ function accrueSlot(life: Life) {
   }
 }
 
+function lifeScore(life: Life): number {
+  return (life.mind + life.health + life.kin + life.social + life.human + life.reputation) / 6;
+}
+
+function policyFit(life: Life): number {
+  const plan = life.plan;
+  if (!plan) return 0;
+  return REGIME_SCALAR[plan.regimeId][policyById(life.policy).exposure];
+}
+
+/** Ambient drift of the person. Same number of draws every call so the clock stays deterministic. */
+function tickStats(life: Life) {
+  const plan = life.plan!;
+  const regime = plan.regimeId;
+  const policy = life.policy;
+  const warm = regime === "expansion" || regime === "bubble" || regime === "recovery";
+  const cold = regime === "crisis" || regime === "recession" || regime === "tightening";
+  const ageDrag = life.age > 58 ? (life.age - 58) * 0.18 : 0;
+
+  let healthTarget = (policy === "health" ? 78 : 62) - ageDrag - (regime === "crisis" ? 5 : regime === "stagflation" ? 2 : 0);
+  if (life.mind < 40) healthTarget -= (40 - life.mind) * 0.2;
+  if (life.kin > 70) healthTarget += 3;
+  healthTarget = clamp(healthTarget, 28, 88);
+
+  let mindTarget = 58;
+  if (life.health < 50) mindTarget -= (50 - life.health) * 0.28;
+  if (life.kin < 45) mindTarget -= (45 - life.kin) * 0.16;
+  if (life.social < 40) mindTarget -= (40 - life.social) * 0.12;
+  if (cold) mindTarget -= 5;
+  if (policy === "cash" || policy === "health") mindTarget += 5;
+  if (!warm && (policy === "leverage" || policy === "venture")) mindTarget -= 4;
+  mindTarget = clamp(mindTarget, 22, 86);
+
+  const humanTarget = clamp(
+    (policy === "human" ? 78 : 56) + (life.age < 18 ? -6 : life.age > 64 ? -4 : 2) - (cold ? 3 : 0),
+    22,
+    88,
+  );
+
+  let kinTarget = policy === "health" || policy === "cash" ? 66 : 56;
+  if (life.mind < 35) kinTarget -= 5;
+  if (regime === "crisis") kinTarget -= 3;
+  kinTarget = clamp(kinTarget, 26, 84);
+
+  let socialTarget = policy === "diversify" || policy === "human" ? 64 : 52;
+  if (life.kin < 35) socialTarget -= 4;
+  if (cold) socialTarget -= 3;
+  if (warm && (policy === "venture" || policy === "leverage")) socialTarget += 3;
+  socialTarget = clamp(socialTarget, 22, 82);
+
+  let repTarget = 52;
+  if (warm && (policy === "leverage" || policy === "venture")) repTarget = 68;
+  if ((regime === "crisis" || regime === "tightening") && policy === "cash") repTarget = 66;
+  if (life.social < 30) repTarget -= 6;
+  if (!policyFits(regime, policy)) repTarget -= 4;
+  repTarget = clamp(repTarget, 20, 84);
+
+  const pull = 0.075;
+  const jitter = () => (draw(life) - 0.5) * 2.4;
+  life.health = clamp(life.health + (healthTarget - life.health) * pull + jitter(), 0, 100);
+  life.mind = clamp(life.mind + (mindTarget - life.mind) * pull + jitter(), 0, 100);
+  life.human = clamp(life.human + (humanTarget - life.human) * pull + jitter() * 0.65, 0, 100);
+  life.kin = clamp(life.kin + (kinTarget - life.kin) * pull + jitter(), 0, 100);
+  life.social = clamp(life.social + (socialTarget - life.social) * pull + jitter(), 0, 100);
+  life.reputation = clamp(life.reputation + (repTarget - life.reputation) * pull + jitter() * 0.55, 0, 100);
+}
+
+function statusRevalue(before: number, after: number): number {
+  return clamp((after - before) * 0.012, -0.03, 0.03);
+}
+
 function slotDrift(life: Life): number {
   const plan = life.plan!;
   const country = countryById(life.countryId);
-  let drift = (REGIME_DRIFT[plan.regimeId] * POLICY_BETA[life.policy]) / 10;
+  const fit = policyFit(life);
+  const appropriate = fit >= 0.85;
   const prod = ageProductivity(life.age);
-  const humanF = 0.62 + (life.human / 100) * 0.7;
-  const healthF = life.health < 25 ? 0.55 : 0.78 + (life.health / 100) * 0.3;
-  const mindF = life.mind < 28 ? 0.72 : 0.88 + (life.mind / 100) * 0.2;
-  const kinF = life.kin < 25 ? 0.9 : 1;
-  drift *= prod * humanF * healthF * mindF * kinF * country.growth;
-  drift *= 1 + life.leverage * (life.policy === "leverage" ? 0.85 : 0.3);
-  drift += (gauss(life) * 0.03 * POLICY_VOL[life.policy] * country.vol) / Math.sqrt(10);
-  if (life.leverage > 0.72 && drift < 0 && (plan.regimeId === "crisis" || plan.regimeId === "tightening")) {
-    drift -= (0.05 + life.leverage * 0.07) / 10;
+  const body = life.health < 25 ? 0.72 : 0.86 + (life.health / 100) * 0.18;
+  const mood = life.mind < 28 ? 0.8 : 0.9 + (life.mind / 100) * 0.12;
+  let drift: number;
+  if (appropriate) {
+    const base = REGIME_DRIFT[plan.regimeId] / 10;
+    if (base >= 0) {
+      drift = base * fit * prod * body * mood * country.growth;
+    } else {
+      drift = base * 0.45 * Math.min(fit, 1.4);
+      drift += (fit - 0.85) * 0.0045 * prod * body;
+    }
+  } else {
+    drift = -(0.85 - Math.min(fit, 0.85)) * 0.008;
+    if (fit < 0) drift -= -fit * 0.012;
   }
+  drift += (gauss(life) * 0.012 * POLICY_VOL[life.policy] * country.vol) / Math.sqrt(10);
+  if (life.leverage > 0.72 && drift < 0 && (plan.regimeId === "crisis" || plan.regimeId === "tightening")) {
+    drift -= (0.04 + life.leverage * 0.05) / 10;
+  }
+  if (!appropriate) drift = Math.min(0, drift);
   return drift;
 }
 
@@ -494,16 +576,28 @@ function kill(life: Life, cause: string): Report {
 
 function playQuietSlot(life: Life) {
   const plan = life.plan!;
+  const before = lifeScore(life);
+  tickStats(life);
+  const revalue = statusRevalue(before, lifeScore(life));
+  const appropriate = policyFit(life) >= 0.85;
   let drift = slotDrift(life);
   let title = CELL_QUIET[Math.floor(draw(life) * CELL_QUIET.length)]!;
   let shown = title;
   if (draw(life) < 0.55) {
     const tape = TAPES[Math.floor(draw(life) * TAPES.length)]!;
-    drift += tape.price;
-    title = tape.title;
-    shown = tape.line;
+    if (appropriate || tape.price <= 0) {
+      drift += tape.price;
+      title = tape.title;
+      shown = tape.line;
+    } else {
+      title = "政策對不上";
+      shown = "消息是順的，但這套基本政策托不住股價。";
+    }
   }
-  drift = clamp(drift, -0.09, 0.08);
+  if (appropriate) drift += revalue;
+  else drift += Math.min(0, revalue);
+  if (!appropriate) drift = Math.min(0, drift);
+  drift = clamp(drift, -0.09, appropriate ? 0.08 : 0);
   movePrice(life, drift, 0);
   life.slot = (life.slot ?? 0) + 1;
   accrueSlot(life);
@@ -522,7 +616,7 @@ function applyChoice(life: Life, index: number): Report | null {
   if (!event || index < 0 || index >= event.choices.length) throw new Error("choice required");
   const choice = event.choices[index]!;
   const priceBefore = life.price;
-  const country = countryById(life.countryId);
+  const scoreBefore = lifeScore(life);
   const scalar = REGIME_SCALAR[plan.regimeId][choice.exposure];
   let pricePct = choice.price * scalar;
   const aligned = policyById(life.policy).exposure === choice.exposure;
@@ -548,7 +642,6 @@ function applyChoice(life: Life, index: number): Report | null {
     pricePct -= 0.05 + life.leverage * 0.08;
     margin = true;
   }
-  pricePct = clamp(pricePct, -0.72, 0.95);
   const sharePct = choice.shares ?? 0;
   life.health = clamp(life.health + (choice.health ?? 0), 0, 100);
   life.human = clamp(life.human + (choice.human ?? 0), 0, 100);
@@ -558,15 +651,27 @@ function applyChoice(life: Life, index: number): Report | null {
   life.social = clamp(life.social + (choice.social ?? 0), 0, 100);
   life.leverage = clamp(life.leverage + (choice.leverage ?? 0), 0, 0.94);
   if (choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
+  tickStats(life);
+  const revalue = statusRevalue(scoreBefore, lifeScore(life));
+  const fit = policyFit(life);
+  const appropriate = fit >= 0.85;
+  if (!appropriate) {
+    pricePct = Math.min(0, pricePct) - Math.max(0, 0.85 - fit) * 0.03 + Math.min(0, revalue);
+  } else {
+    pricePct = pricePct * (0.65 + Math.min(fit, 1.8) * 0.4) + revalue;
+  }
+  pricePct = clamp(pricePct, -0.72, appropriate ? 0.95 : 0);
   movePrice(life, pricePct, sharePct);
   const economic = life.price / priceBefore - 1;
-  const bits = [`「${plan.regimeName}」對「${EXPOSURE_NAME[choice.exposure]}」的係數是 ${scalar.toFixed(2)}，股價 ${signed(economic)}`];
-  if (aligned) bits.push("與你的基本政策同向，波幅被放大");
-  if (hedged) bits.push("現金或分散削掉了一部分跌幅");
+  const bits = [
+    appropriate
+      ? `基本政策合這段「${plan.regimeName}」，這一步可以改寫股價，結果 ${signed(economic)}`
+      : `基本政策不合這段「${plan.regimeName}」，股價沒有被推上去，結果 ${signed(economic)}`,
+  ];
   if (bust) bits.push("對手方倒了，這筆變成虧損");
   if (margin) bits.push("槓桿觸發追繳");
-  if (sharePct > 0.02) bits.push(`流通股增發 ${signed(sharePct)}，每股被攤薄`);
-  if (sharePct < -0.02) bits.push(`回購 ${signed(-sharePct)}`);
+  if (sharePct > 0.02) bits.push("流通股增發，每股被攤薄");
+  if (sharePct < -0.02) bits.push("公司回購了一部分");
   plan.explanation = `${plan.explanation ?? ""}${bits.join("。")}。`;
   plan.sharePct = sharePct;
   plan.title = event.title;
@@ -617,34 +722,9 @@ function applyChoice(life: Life, index: number): Report | null {
 }
 
 function ageAYear(life: Life) {
-  const plan = life.plan!;
-  life.human = clamp(life.human + (life.policy === "human" ? 1.05 : 0.22) - (life.age > 64 ? 0.35 : 0), 0, 100);
-  life.health = clamp(
-    life.health +
-      (life.policy === "health" ? 0.4 : -0.1) -
-      (life.age > 58 ? (life.age - 58) * 0.055 : 0) -
-      (plan.regimeId === "crisis" ? 0.35 : 0),
-    0,
-    100,
-  );
-  if (!plan.hadChoice) {
-    const open = plan.yearOpenUsd ?? priceUsd(life);
-    const drift = open > 0 ? priceUsd(life) / open - 1 : 0;
-    life.reputation = clamp(life.reputation + (drift > 0.02 ? 0.25 : drift < -0.02 ? -0.25 : 0), 0, 100);
-  }
   const target = life.policy === "cash" ? 0.06 : life.policy === "leverage" ? 0.58 : life.policy === "venture" ? 0.34 : 0.16;
   life.leverage = clamp(life.leverage + (target - life.leverage) * 0.18, 0, 0.94);
   life.side = Math.max(0, life.side * 0.9);
-  life.mind = clamp(
-    life.mind + (life.health - 60) * 0.04 + (life.kin - 55) * 0.035 + (life.social - 55) * 0.03 - (life.mind - 58) * 0.05,
-    0,
-    100,
-  );
-  if (life.mind < 35) life.health = clamp(life.health - 0.45, 0, 100);
-  if (life.kin > 70 && life.health < 70) life.health = clamp(life.health + 0.2, 0, 100);
-  if (life.social < 30) life.reputation = clamp(life.reputation - 0.2, 0, 100);
-  life.kin = clamp(life.kin - (life.kin - 58) * 0.03, 0, 100);
-  life.social = clamp(life.social - (life.social - 52) * 0.03, 0, 100);
 }
 
 function closeYear(life: Life): Report {

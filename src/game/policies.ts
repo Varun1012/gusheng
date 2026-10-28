@@ -1,4 +1,5 @@
-import type { Exposure, PolicyId } from "@/game/types";
+import { REGIME_SCALAR } from "@/game/regimes";
+import type { Exposure, PolicyId, RegimeId } from "@/game/types";
 
 export interface Policy {
   id: PolicyId;
@@ -49,4 +50,9 @@ export function policyById(id: PolicyId): Policy {
   const found = POLICIES.find((p) => p.id === id);
   if (!found) throw new Error(id);
   return found;
+}
+
+/** True when this basic policy's exposure is one the regime actually rewards. */
+export function policyFits(regimeId: RegimeId, policyId: PolicyId): boolean {
+  return REGIME_SCALAR[regimeId][policyById(policyId).exposure] >= 0.85;
 }
