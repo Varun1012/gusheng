@@ -74,6 +74,8 @@ export interface YearPlan {
   recent?: string[];
   anchorDone?: boolean;
   hadChoice?: boolean;
+  /** Cells 1–10 that may stop for a major choice. At most two. Empty is a quiet year. */
+  choiceSlots?: number[];
   priceFrom?: number;
   priceTo?: number;
   sharesFrom?: number;

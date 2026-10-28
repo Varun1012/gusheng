@@ -1052,6 +1052,7 @@ export const EVENTS: GameEvent[] = [
     regimes: ["crisis"],
     weight: 0.45,
     facet: "social",
+    major: true,
     title: "街上的秩序鬆了",
     body: "外面不安穩。這不是照著哪一年的頭條排的，是你得決定這具身體還要不要留在這裡。",
     choices: [
@@ -1604,6 +1605,10 @@ export const EVENTS: GameEvent[] = [
   },
   ...PERSONAL_EVENTS,
 ];
+
+for (const event of EVENTS) {
+  if (!event.facet) event.major = true;
+}
 
 export function eventById(id: string): GameEvent | undefined {
   return EVENTS.find((e) => e.id === id);

@@ -78,7 +78,13 @@ function copy(life: Life): Life {
     history: [...life.history],
     log: [...life.log],
     origin: { ...life.origin },
-    plan: life.plan ? { ...life.plan, recent: life.plan.recent ? [...life.plan.recent] : undefined } : null,
+    plan: life.plan
+      ? {
+          ...life.plan,
+          recent: life.plan.recent ? [...life.plan.recent] : undefined,
+          choiceSlots: life.plan.choiceSlots ? [...life.plan.choiceSlots] : undefined,
+        }
+      : null,
     cool: { ...(life.cool ?? {}) },
   };
 }
@@ -232,18 +238,25 @@ export function createLife(input: BirthInput = {}): Life {
   return life;
 }
 
-function slotChance(life: Life): number {
-  let chance = 0.46;
-  if (life.mind < 42) chance += 0.06;
-  if (life.health < 48) chance += 0.05;
-  if (life.kin < 42) chance += 0.05;
-  if (life.social < 42) chance += 0.04;
-  return Math.min(0.68, chance);
+/** 0, 1, or 2 cells this year. Which cells is random, not a fixed grid. */
+function rollChoiceSlots(life: Life): number[] {
+  const roll = draw(life);
+  const count = roll < 0.22 ? 0 : roll < 0.7 ? 1 : 2;
+  const bag = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const slots: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const index = Math.floor(draw(life) * bag.length);
+    const slot = bag.splice(index, 1)[0];
+    if (slot !== undefined) slots.push(slot);
+  }
+  slots.sort((a, b) => a - b);
+  return slots;
 }
 
 function tunedWeight(event: (typeof EVENTS)[number], life: Life): number {
   let weight = event.weight ?? 1;
   if (event.anchorAge === life.age) weight *= 4;
+  if (!event.facet) weight *= 2.4;
   const facet = event.facet;
   if (facet === "mind") weight *= life.mind < 45 ? 2.4 : life.mind > 75 ? 0.75 : 1;
   if (facet === "body") weight *= life.health < 50 ? 2.3 : 1;
@@ -257,11 +270,14 @@ function tunedWeight(event: (typeof EVENTS)[number], life: Life): number {
 
 function pickSlotEvent(life: Life): string | null {
   const plan = life.plan;
-  if (!plan) return null;
-  if (draw(life) > slotChance(life)) return null;
-  const pool = EVENTS.filter((event) => eligible(event, life, plan.regimeId));
+  if (!plan?.choiceSlots) return null;
+  const nextSlot = (life.slot ?? 0) + 1;
+  if (!plan.choiceSlots.includes(nextSlot)) return null;
+  const pool = EVENTS.filter((event) => event.major && eligible(event, life, plan.regimeId));
   if (pool.length === 0) return null;
-  const weights = pool.map((event) => ({ event, weight: tunedWeight(event, life) }));
+  const anchors = pool.filter((event) => event.anchorAge === life.age);
+  const use = anchors.length > 0 ? anchors : pool;
+  const weights = use.map((event) => ({ event, weight: tunedWeight(event, life) }));
   const total = weights.reduce((sum, item) => sum + item.weight, 0);
   let roll = draw(life) * total;
   for (const item of weights) {
@@ -295,6 +311,7 @@ export function beginYear(life: Life): Life {
     payNote,
     anchorDone: false,
     hadChoice: false,
+    choiceSlots: rollChoiceSlots(next),
     recent: [],
     explanation: "",
   };
@@ -598,9 +615,6 @@ function playQuietSlot(life: Life) {
       drift += tape.price;
       title = tape.title;
       shown = tape.line;
-    } else {
-      title = "政策對不上";
-      shown = "消息是順的，但這套基本政策托不住股價。";
     }
   }
   if (appropriate) drift += revalue;
@@ -780,6 +794,7 @@ export function advance(source: Life): { life: Life; report: Report | null } {
   if (!life.plan || life.plan.slotMode !== "cell" || life.plan.age !== life.age) life = beginYear(life);
   const plan = life.plan;
   if (!plan) return { life, report: null };
+  if (!plan.choiceSlots) plan.choiceSlots = rollChoiceSlots(life);
   if (plan.eventId && !plan.committed) return { life: source, report: null };
   if ((life.slot ?? 0) >= 10) {
     const report = closeYear(life);

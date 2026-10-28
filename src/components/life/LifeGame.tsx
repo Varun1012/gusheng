@@ -51,11 +51,11 @@ import {
   type MusicPrefs,
 } from "@/game/music";
 import { tierLabel } from "@/game/names";
-import { POLICIES, policyFits, type Policy } from "@/game/policies";
+import { POLICIES, type Policy } from "@/game/policies";
 import { regimeFor } from "@/game/regimes";
 import { policyMood, SPENDS, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
-import type { BirthInput, HistPoint, Life, PolicyId, RegimeId, Report } from "@/game/types";
+import type { BirthInput, HistPoint, Life, PolicyId, Report } from "@/game/types";
 
 declare global {
   interface Window {
@@ -142,30 +142,11 @@ function Meter({ label, value }: { label: string; value: number }) {
   );
 }
 
-function fitLine(regimeId: RegimeId): string {
-  const names = POLICIES.filter((policy) => policyFits(regimeId, policy.id)).map((policy) => policy.name);
-  return names.length > 0 ? `此刻合用：${names.join("、")}` : "此刻沒有合用的基本政策";
-}
-
-function PolicyPicker({
-  active,
-  regimeId,
-  onPick,
-}: {
-  active: PolicyId;
-  regimeId: RegimeId;
-  onPick: (id: PolicyId) => void;
-}) {
+function PolicyPicker({ active, onPick }: { active: PolicyId; onPick: (id: PolicyId) => void }) {
   return (
     <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
       {POLICIES.map((policy) => (
-        <PolicyChip
-          key={policy.id}
-          policy={policy}
-          active={active === policy.id}
-          fit={policyFits(regimeId, policy.id)}
-          onPick={onPick}
-        />
+        <PolicyChip key={policy.id} policy={policy} active={active === policy.id} onPick={onPick} />
       ))}
     </div>
   );
@@ -174,12 +155,10 @@ function PolicyPicker({
 function PolicyChip({
   policy,
   active,
-  fit,
   onPick,
 }: {
   policy: Policy;
   active: boolean;
-  fit: boolean;
   onPick: (id: PolicyId) => void;
 }) {
   const Icon = POLICY_ICON[policy.id];
@@ -196,7 +175,6 @@ function PolicyChip({
       <span className="flex items-center gap-2 text-sm font-medium">
         <Icon className="size-4" aria-hidden="true" />
         {policy.name}
-        {fit ? <span className={active ? "text-ink/70" : "text-gold"}>合</span> : null}
       </span>
     </button>
   );
@@ -689,8 +667,8 @@ function Title({
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
-            <li>六種基本政策隨時可換。只有合當前市道的，才能把股價推上去。換一套政策，心理、健康、家庭、社會會跟著偏。</li>
-            <li>一年十格，每秒走一格。任何一格都可能要你抉擇，沒有排好的題號。沒有抉擇就繼續報價。</li>
+            <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏。</li>
+            <li>一年十格，每秒走一格。重大抉擇一年一兩次，也可以一次都沒有，而且不固定落在哪一格。沒有抉擇就繼續報價。</li>
             <li>市場的冷暖取材自歷史，只作背景，不跟某一年的新聞對時。臨到身上的是這個人的心理、身體、家庭和社會。</li>
             <li>出生時個人資金是零。父母會養，但不必等到十八歲：童工、兼職的錢進個人資金，看病、吃飯、人情從這裡出。十八歲董事局才定正式薪酬。</li>
             <li>個人資金可以花在興趣上，也可以花下去換一種工作。每一格只能花一筆。花了，狀態會動。</li>
@@ -830,8 +808,7 @@ function Birth({
         </div>
         <div>
           <p className="mb-2 text-sm text-muted">基本政策，可以隨時換</p>
-          <p className="mb-2 text-xs text-gold">{fitLine(regime.id)}</p>
-          <PolicyPicker active={life.policy} regimeId={regime.id} onPick={onPolicy} />
+          <PolicyPicker active={life.policy} onPick={onPolicy} />
         </div>
       </div>
     </section>
@@ -1045,15 +1022,14 @@ function Play({
             <Meter label="社會" value={life.social ?? 50} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted">
-            這四條每一格都會動，花錢和換政策也會把它們推開。轉差會壓低股價；轉好要基本政策合用，才抬得上去。
+            這四條每一格都會動，花錢和換政策也會把它們推開。轉差會壓低股價。
           </p>
         </div>
       </div>
 
       <div>
         <p className="mb-2 text-sm text-muted">基本政策</p>
-        <p className="mb-2 text-xs text-gold">{fitLine(plan.regimeId)}</p>
-        <PolicyPicker active={life.policy} regimeId={plan.regimeId} onPick={onPolicy} />
+        <PolicyPicker active={life.policy} onPick={onPolicy} />
         <p className="mt-2 text-xs leading-relaxed text-muted">{policyMood(life.policy)}</p>
       </div>
 
@@ -1062,7 +1038,7 @@ function Play({
       {event ? (
         <div className="rounded-2xl border border-gold/50 bg-panel p-5">
           <p className="text-xs text-gold">
-            {(event.facet && FACET_NAME[event.facet]) || "抉擇"} · {life.age}歲 · 這一刻
+            {event.facet ? `重大抉擇 · ${FACET_NAME[event.facet]}` : "重大抉擇"} · {life.age}歲 · 這一刻
           </p>
           <h2 className="mt-1 font-serif text-2xl">{event.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{event.body}</p>

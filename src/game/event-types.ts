@@ -51,5 +51,7 @@ export interface GameEvent {
   repeat?: boolean;
   /** Years before a repeatable question can return. */
   cooldown?: number;
+  /** Pauses the year. Everyday frictions stay off this list. */
+  major?: boolean;
   when?: (life: Life) => boolean;
 }

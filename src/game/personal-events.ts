@@ -741,3 +741,29 @@ export const PERSONAL_EVENTS: GameEvent[] = [
     ],
   },
 ];
+
+/** Heavy enough to stop the year. Smaller frictions stay in the spend column. */
+const MAJOR_IDS = new Set([
+  "who_holds",
+  "child_fever",
+  "family_shop",
+  "factory_child",
+  "parents_row",
+  "pick_side",
+  "sibling_ask",
+  "elder_ill",
+  "move_block",
+  "school_or_shift",
+  "night_shift",
+  "lend_friend",
+  "rent_due",
+  "work_injury",
+  "family_secret",
+  "funeral",
+  "own_child_sick",
+  "adult_hustle",
+]);
+
+for (const event of PERSONAL_EVENTS) {
+  if (MAJOR_IDS.has(event.id)) event.major = true;
+}
