@@ -45,6 +45,7 @@ export function loadSnap(): Snap | null {
     life.homeValue ??= 0;
     life.homeDebt ??= 0;
     life.houseYear ??= 0;
+    if (life.flags) life.flags.office ??= false;
     if (life.flags?.home && !(life.homeValue > 0)) {
       life.homeValue = quotedHome(life);
       life.homeDebt ??= 0;

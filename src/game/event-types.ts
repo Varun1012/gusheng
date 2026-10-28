@@ -35,6 +35,8 @@ export interface ChoiceDef {
   gainUsd?: number;
   /** Sets yearly side income (child work, part-time), in USD. 0 quits it. */
   sideUsd?: number;
+  /** Run for office. Success takes the seat. A funded loss gives it up. */
+  seekOffice?: boolean;
   hazard?: number;
   cause?: string;
   relist?: string | "safer" | "richer";

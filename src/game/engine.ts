@@ -170,7 +170,7 @@ export function createLife(input: BirthInput = {}): Life {
     policy: "diversify",
     tier: "middle",
     family: "",
-    flags: { degree: false, married: false, children: false, home: false, founder: false, civil: false },
+    flags: { degree: false, married: false, children: false, home: false, founder: false, civil: false, office: false },
     used: [],
     history: [],
     log: [],
@@ -498,6 +498,7 @@ export function satisfaction(life: Life): number {
   if (majorFits(life.major, life.career)) score += 3;
   const year = life.plan?.year ?? life.birthYear + life.age;
   if (life.hobby && life.hobbyYear === year) score += 3;
+  if (life.flags.office) score += 3;
   if (life.age >= 23 && !life.career && (life.job ?? 0) <= 0 && (life.side ?? 0) <= 0 && !life.chairman) score -= 8;
   return clamp(score, 0, 100);
 }
@@ -614,7 +615,9 @@ function choiceSamples(life: Life, exposure: Exposure): number[] {
 
 /** Success odds for a major choice. Higher when the bars that choice leans on are healthier. */
 export function choiceChance(life: Life, choice: ChoiceDef): number {
-  const samples = choiceSamples(life, choice.exposure);
+  const samples = choice.seekOffice
+    ? [life.social, life.reputation, life.mind]
+    : choiceSamples(life, choice.exposure);
   const avg = samples.reduce((sum, n) => sum + n, 0) / samples.length;
   return clamp(0.16 + (avg / 100) * 0.76, 0.12, 0.93);
 }
@@ -796,6 +799,10 @@ function applyChoice(life: Life, index: number): Report | null {
   life.social = clamp(life.social + tilt(choice.social), 0, 100);
   life.leverage = clamp(life.leverage + (succeeded ? (choice.leverage ?? 0) : Math.min(0, choice.leverage ?? 0)), 0, 0.94);
   if (succeeded && choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
+  if (choice.seekOffice) {
+    if (succeeded) life.flags = { ...life.flags, office: true };
+    else if (!broke) life.flags = { ...life.flags, office: false };
+  }
   if (succeeded && choice.major) life.major = choice.major;
   if (succeeded && choice.career) {
     life.career = choice.career;
@@ -845,7 +852,11 @@ function applyChoice(life: Life, index: number): Report | null {
   const money: string[] = [];
   const bought = buying && afford && succeeded;
   if (broke) {
-    money.push(`這筆要 ${formatMoney(due)} ${ccyNow}，個人資金不夠，沒有辦成`);
+    money.push(
+      choice.seekOffice
+        ? `選舉開支要 ${formatMoney(due)} ${ccyNow}，個人資金不夠，沒有辦成`
+        : `這筆要 ${formatMoney(due)} ${ccyNow}，個人資金不夠，沒有辦成`,
+    );
   } else if (choice.house === "sell" && life.flags.home && succeeded) {
     const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
     life.purse += equity;
@@ -882,10 +893,14 @@ function applyChoice(life: Life, index: number): Report | null {
     }
     money.push(
       paid + 0.5 >= cost
-        ? `個人資金扣了 ${formatMoney(paid)} ${ccy}`
+        ? choice.seekOffice
+          ? `選舉開支，個人資金扣了 ${formatMoney(paid)} ${ccy}`
+          : `個人資金扣了 ${formatMoney(paid)} ${ccy}`
         : `這筆要 ${formatMoney(cost)} ${ccy}，個人資金只扣到見底，扣了 ${formatMoney(paid)} ${ccy}`,
     );
   }
+  if (choice.seekOffice && succeeded) money.push("當選，在任");
+  else if (choice.seekOffice && !broke && !succeeded) money.push("沒有當選");
   if (succeeded && choice.gainUsd) {
     const gained = choice.gainUsd * fx;
     life.purse += gained;

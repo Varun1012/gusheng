@@ -31,6 +31,8 @@ export interface Flags {
   home: boolean;
   founder: boolean;
   civil: boolean;
+  /** Holds an elected seat. Older saves omit this. */
+  office?: boolean;
 }
 
 export interface HistPoint {
