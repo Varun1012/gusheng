@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "出生即上市。在當地、該年齡的死亡率除牌之前，把股價與市值做到最大。",
+        content: "出生即上市。在當地、該年齡的死亡率除牌之前，把股價做上去。滿足度來自生理、心理、成就、精神。",
       },
       { name: "theme-color", content: "#101418" },
     ],

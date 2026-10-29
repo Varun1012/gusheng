@@ -194,10 +194,7 @@ export function spendOpen(
   fx: number,
 ): boolean {
   if (!spendVisible(item, life.age)) return false;
-  const year = hobbyYearOf(life);
-  const focused = Boolean(life.hobby) && life.hobbyYear === year;
-  if (item.group === "hobby" && focused && life.hobby === item.id) return true;
-  if (item.group === "hobby" && focused && life.hobby !== item.id) return false;
+  if (item.group === "hobby" && life.hobby) return life.hobby === item.id;
   if (item.group !== "hobby" && (life.spentKey ?? "") === spendCellKey(life)) return false;
   return true;
 }

@@ -25,6 +25,8 @@ import {
   choiceChance,
   choiceMoney,
   choose,
+  debtRoom,
+  dimensions,
   previewMortality,
   runBalance,
   satisfaction,
@@ -56,6 +58,7 @@ import {
   setDuck,
   toll,
   unlockAudio,
+  verdictSound,
   DEFAULT_MUSIC,
   type MusicPrefs,
 } from "@/game/music";
@@ -65,6 +68,7 @@ import { REGIME_NAME, cycleBlurb } from "@/game/regimes";
 import { policyMood, SPENDS, investChance, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
 import type { BirthInput, HistPoint, Life, PolicyId, Report } from "@/game/types";
+import type { Dimensions } from "@/game/engine";
 
 declare global {
   interface Window {
@@ -102,6 +106,26 @@ function tone(n: number): string {
   return "text-muted";
 }
 
+function shiftRows(before: Dimensions, after: Dimensions) {
+  return (
+    [
+      ["生理", after.body - before.body],
+      ["心理", after.mind - before.mind],
+      ["成就", after.achieve - before.achieve],
+      ["精神", after.spirit - before.spirit],
+    ] as const
+  ).map(([name, delta]) => ({ name, delta: Math.round(delta) }));
+}
+
+type Verdict = {
+  ok: boolean;
+  label: string;
+  detail: string;
+  shifts: { name: string; delta: number }[];
+  next: Life;
+  report: Report | null;
+};
+
 const FACET_NAME: Record<string, string> = {
   mind: "心理",
   body: "身體",
@@ -115,7 +139,7 @@ function Spark({ points }: { points: HistPoint[] }) {
   if (points.length < 2) {
     return <div className="flex h-28 items-center text-sm text-muted">上市第一筆報價，曲線還沒有長度。</div>;
   }
-  const values = points.map((p) => p.capUsd);
+  const values = points.map((p) => p.priceUsd ?? p.price);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -129,7 +153,7 @@ function Spark({ points }: { points: HistPoint[] }) {
   const line = coords.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
   const area = `${line} L${w},${h} L0,${h} Z`;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-28 w-full" role="img" aria-label="市值曲線">
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-28 w-full" role="img" aria-label="股價曲線">
       <path d={area} fill="var(--color-gold)" opacity="0.16" />
       <path d={line} fill="none" stroke="var(--color-gold)" strokeWidth="2.5" />
     </svg>
@@ -202,6 +226,7 @@ export function LifeGame() {
   const [showLog, setShowLog] = useState(false);
   const [ready, setReady] = useState(false);
   const [quoting, setQuoting] = useState(true);
+  const [verdict, setVerdict] = useState<Verdict | null>(null);
   const tolled = useRef<string | null>(null);
 
   useEffect(() => {
@@ -280,10 +305,26 @@ export function LifeGame() {
   }
 
   function act(index: number) {
-    if (!life?.plan) return;
+    if (!life?.plan || verdict) return;
+    unlockAudio();
+    const before = dimensions(life);
+    const label = currentChoices(life)[index]?.label ?? "";
     const step = acceptChoice(life, index);
-    if (step.report) settle(step.life, step.report);
-    else setLife(step.life);
+    const after = dimensions(step.life);
+    const detail = step.report?.detail || step.life.plan?.detail || "";
+    const ok = detail.includes("成了");
+    verdictSound(ok);
+    setQuoting(false);
+    setVerdict({ ok, label, detail, shifts: shiftRows(before, after), next: step.life, report: step.report });
+  }
+
+  function dismissVerdict() {
+    if (!verdict) return;
+    const held = verdict;
+    setVerdict(null);
+    if (held.report) settle(held.next, held.report);
+    else setLife(held.next);
+    setQuoting(true);
   }
 
   function finishYear() {
@@ -472,6 +513,34 @@ export function LifeGame() {
         )}
 
         {phase === "board" && <Board rows={board} onBack={() => setPhase(returnTo)} />}
+        {verdict && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4">
+            <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-line bg-panel p-6">
+              <p className={"font-serif text-4xl " + (verdict.ok ? "text-gold" : "text-ivory")}>
+                {verdict.ok ? "正確選擇" : "錯誤選擇"}
+              </p>
+              {verdict.label ? <p className="mt-2 text-sm text-muted">{verdict.label}</p> : null}
+              <ul className="mt-5 space-y-2">
+                {verdict.shifts.map((row) => (
+                  <li key={row.name} className="flex items-center justify-between gap-3 text-sm">
+                    <span>{row.name}</span>
+                    <span className="font-mono text-ivory">
+                      {row.delta > 0 ? `升 ${row.delta}` : row.delta < 0 ? `降 ${Math.abs(row.delta)}` : "沒有動"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {verdict.detail ? <p className="mt-4 text-sm leading-relaxed text-muted">{verdict.detail}</p> : null}
+              <button
+                type="button"
+                onClick={dismissVerdict}
+                className="mt-5 min-h-11 w-full rounded-xl bg-gold px-4 py-3 font-medium text-ink"
+              >
+                {verdict.next.alive ? "繼續" : "看除牌"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
@@ -664,8 +733,8 @@ function Title({
           做成一隻股票
         </h1>
         <div className="mt-5 max-w-xl space-y-3 text-base leading-relaxed text-muted">
-          <p>你可以赤貧，也可以含著金湯匙。目標只有一個：除牌之前，把股價與市值一起做到最大。</p>
-          <p>臨到你身上的，是心理、身體、家庭和社會，還有個人資金怎麼花。市場冷暖只是背景，取材自歷史，不跟某一年的新聞對時。</p>
+          <p>你可以赤貧，也可以含著金湯匙。目標只有一個：除牌之前，把股價做上去。</p>
+          <p>滿足度來自四個向度：生理、心理、成就、精神。市場冷暖只是背景，不跟真實年份對時。</p>
           <p>死亡不由劇情赦免。這一年的死亡率拆進十格裡擲，健康與政策會改這個數。每一格都自己計一次股價。</p>
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -696,16 +765,15 @@ function Title({
           <Landmark className="size-6 text-gold" aria-hidden="true" />
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
-            <li>出身決定開盤價與市值，國家決定匯率、波動與壽命。</li>
-            <li>六種基本政策隨時可換。換一套，心理、健康、家庭、社會會跟著偏，滿足度也跟著偏。</li>
-            <li>股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。遇上經濟大事，價格會先重重晃一下，再收回一部分。</li>
+            <li>出身決定開盤價，國家決定匯率、波動與壽命。</li>
+            <li>六種基本政策隨時可換。換一套，四個向度會跟著偏，滿足度也跟著偏。</li>
+            <li>滿足度來自生理、心理、成就、精神。股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。</li>
             <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
-            <li>重大抉擇一年一兩次，也可以一次都沒有。成不成看這個人的狀態。牽涉到錢的，會寫明從個人資金扣了多少。不夠的差額記成負債，不會辦不成。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
-            <li>興趣一年只集中一門。大學選科、職業、買樓賣樓、投票、自己參選，都是這個人自己的事。投票不用錢。自己參選要付選舉開支。</li>
+            <li>重大抉擇一年一兩次，也可以一次都沒有。每次只有兩項。選完會告訴你正確還是錯誤，以及四個向度怎麼動。</li>
+            <li>興趣只能定一門，定了就一直做。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
-            <li>出生時個人資金是零，負債也是零。父母會養日常。童工、兼職、後來的職業，錢進個人資金。自己要花的錢如果不夠，差額記成負債。</li>
+            <li>負債年利率一成。不夠的差額記成負債，最多一萬美元。滾到五萬美元，這一世結束。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
-            <li>增發會做大市值、做薄股價。兩個都要大，才算真的上市成功。</li>
           </ul>
         </div>
         <p className="mt-6 font-mono text-xs text-gold">IPO OF A LIFE</p>
@@ -814,8 +882,6 @@ function Birth({
         </p>
         <dl className="mt-6 grid grid-cols-2 gap-4">
           <Stat k="開盤價" v={`${formatPrice(life.price)} ${market.ccy}`} />
-          <Stat k="開盤市值" v={`${formatCompact(life.price * life.shares)} ${market.ccy}`} />
-          <Stat k="約合美元" v={`USD ${formatCompact(life.ipoCapUsd)}`} />
           <Stat k="流通股" v={formatCompact(life.shares)} />
         </dl>
       </div>
@@ -834,10 +900,10 @@ function Birth({
             死亡率依{market.name}、{life.birthYear}年、0歲估算。越早的年份越高。進入市場後才擲骰。
           </p>
           <div className="mt-4 space-y-3">
-            <Meter label="心理" value={life.mind ?? 50} />
-            <Meter label="健康" value={life.health} />
-            <Meter label="家庭" value={life.kin ?? 50} />
-            <Meter label="社會" value={life.social ?? 50} />
+            <Meter label="生理" value={dimensions(life).body} />
+            <Meter label="心理" value={dimensions(life).mind} />
+            <Meter label="成就" value={dimensions(life).achieve} />
+            <Meter label="精神" value={dimensions(life).spirit} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted">{policyMood(life.policy)}</p>
           {life.statusNote ? <p className="mt-1 text-sm text-ivory">{life.statusNote}</p> : null}
@@ -879,13 +945,12 @@ function SpendColumn({
   const jobs = SPENDS.filter((item) => item.group === "work" && spendVisible(item, life.age));
   const investments = SPENDS.filter((item) => item.group === "invest" && spendVisible(item, life.age));
   const doing = workLabel(life.work);
-  const year = life.plan?.year ?? life.birthYear + life.age;
-  const focused = Boolean(life.hobby) && life.hobbyYear === year;
-  const hobby = focused ? SPENDS.find((item) => item.id === life.hobby) : undefined;
+  const hobby = life.hobby ? SPENDS.find((item) => item.id === life.hobby) : undefined;
   const ccy = countryById(life.countryId).ccy;
   const home = quotedHome(life);
   const down = home * 0.3;
   const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
+  const year = life.plan?.year ?? life.birthYear + life.age;
   const traded = (life.houseYear ?? 0) === year;
   const chair = life.age >= 18 ? chairCost(life) : 0;
   return (
@@ -893,16 +958,16 @@ function SpendColumn({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-serif text-2xl">個人花錢</h2>
         <p className="text-xs text-muted">
-          {hobby ? `今年集中：${hobby.label}` : "今年還沒選興趣"}
+          {hobby ? `這一門：${hobby.label}` : "還沒選定興趣"}
           {doing ? ` · 正在做的：${doing}` : ""}
           {life.career ? ` · 職業已定` : ""}
         </p>
       </div>
       <p className="mt-2 text-sm text-ivory">
-        {life.statusNote || "興趣一年一門。走路和去公園不用錢。"}
+        {life.statusNote || "興趣只能定一門，定了就一直做。"}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
-        零工和投資其他公司，每一格一筆。錢不夠會記成負債，不會辦不成。
+        零工和投資其他公司，每一格一筆。錢不夠會記成負債。負債最多一萬美元，年利率一成。
       </p>
       {hobbies.length === 0 && jobs.length === 0 && investments.length === 0 ? (
         <p className="mt-4 text-sm text-muted">還小，興趣要再大一點。</p>
@@ -942,13 +1007,21 @@ function SpendColumn({
               <>
                 <HouseButton
                   label="付三成買樓"
-                  sub={`扣 ${formatMoney(down)} ${ccy}${life.purse + 0.5 < down ? " · 不夠記成負債" : ""}`}
+                  sub={
+                    life.purse + debtRoom(life) + 0.5 < down
+                      ? `扣 ${formatMoney(down)} ${ccy} · 超過負債上限`
+                      : `扣 ${formatMoney(down)} ${ccy}${life.purse + 0.5 < down ? " · 不夠記成負債" : ""}`
+                  }
                   disabled={traded}
                   onClick={() => onBuyHome("mortgage")}
                 />
                 <HouseButton
                   label="一次過付清"
-                  sub={`扣 ${formatMoney(home)} ${ccy}${life.purse + 0.5 < home ? " · 不夠記成負債" : ""}`}
+                  sub={
+                    life.purse + debtRoom(life) + 0.5 < home
+                      ? `扣 ${formatMoney(home)} ${ccy} · 超過負債上限`
+                      : `扣 ${formatMoney(home)} ${ccy}${life.purse + 0.5 < home ? " · 不夠記成負債" : ""}`
+                  }
                   disabled={traded}
                   onClick={() => onBuyHome("cash")}
                 />
@@ -969,7 +1042,11 @@ function SpendColumn({
             ) : (
               <HouseButton
                 label="買回股票，出任主席"
-                sub={`扣 ${formatMoney(chair)} ${ccy}${life.purse + 0.5 < chair ? " · 不夠記成負債" : ""}`}
+                sub={
+                  life.purse + debtRoom(life) + 0.5 < chair
+                    ? `扣 ${formatMoney(chair)} ${ccy} · 超過負債上限`
+                    : `扣 ${formatMoney(chair)} ${ccy}${life.purse + 0.5 < chair ? " · 不夠記成負債" : ""}`
+                }
                 disabled={false}
                 onClick={onChair}
               />
@@ -1029,23 +1106,22 @@ function SpendRow({
       <div className="mt-2 flex flex-wrap gap-2">
         {items.map((item) => {
           const open = spendOpen(item, life, fx);
-          const year = life.plan?.year ?? life.birthYear + life.age;
-          const focused = Boolean(life.hobby) && life.hobbyYear === year;
-          const hobbyOn = item.group === "hobby" && focused && life.hobby === item.id;
-          const lockedOut = item.group === "hobby" && focused && life.hobby !== item.id;
+          const hobbyOn = item.group === "hobby" && life.hobby === item.id;
+          const lockedOut = item.group === "hobby" && Boolean(life.hobby) && life.hobby !== item.id;
           const workOn = Boolean(item.work && life.work === item.work);
           const cost = item.usd * fx;
           const chance = item.invest ? Math.round(investChance(life, item.invest.lean) * 100) : null;
-          const short = cost > 0.5 && (life.purse ?? 0) + 0.5 < cost;
+          const over = cost > 0.5 && life.purse + debtRoom(life) + 0.5 < cost;
+          const short = !over && cost > 0.5 && life.purse + 0.5 < cost;
           const sub = hobbyOn
-            ? "今年集中"
+            ? "一直在做"
             : lockedOut
-              ? "今年已有一門"
+              ? "只能一門"
               : item.usd <= 0
                 ? "不用錢"
                 : chance !== null
-                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%${short ? " · 不夠記成負債" : ""}`
-                  : `扣 ${formatMoney(cost)} ${ccy}${short ? " · 不夠記成負債" : ""}`;
+                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`
+                  : `扣 ${formatMoney(cost)} ${ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`;
           return (
             <button
               key={item.id}
@@ -1101,7 +1177,7 @@ function Play({
   const plan = life.plan!;
   const event = currentEventCopy(life);
   const choices = currentChoices(life);
-  const cap = life.price * life.shares;
+  const dims = dimensions(life);
   const last = reports[reports.length - 1];
 
   return (
@@ -1136,7 +1212,7 @@ function Play({
 
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-3">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-muted">股價</p>
               <p className="font-mono text-3xl sm:text-4xl">{formatPrice(life.price)}</p>
@@ -1146,20 +1222,13 @@ function Play({
               </p>
             </div>
             <div>
-              <p className="text-xs text-muted">市值</p>
-              <p className="font-mono text-3xl sm:text-4xl">{formatCompact(cap)}</p>
-              <p className="text-xs text-muted">{market.ccy}</p>
-              <p className={"mt-1 font-mono text-sm " + tone(capMultiple(life) - 1)}>
-                自上市 {formatMultiple(capMultiple(life))} · USD {formatCompact(capUsd(life))}
-              </p>
-            </div>
-            <div className="col-span-2 sm:col-span-1">
               <p className="text-xs text-muted">個人資金</p>
               <p className="font-mono text-3xl sm:text-4xl">{(life.purse ?? 0) > 0 ? formatCompact(life.purse) : "0"}</p>
               <p className="text-xs text-muted">{market.ccy}</p>
               {(life.debt ?? 0) > 1 && (
                 <p className="mt-1 font-mono text-sm text-ivory">負債 {formatMoney(life.debt ?? 0)} {market.ccy}</p>
               )}
+              <p className="mt-1 text-xs text-muted">年利率一成 · 記成負債上限一萬美元</p>
               <p className="mt-1 text-sm text-muted">
                 {life.chairman
                   ? `主席薪酬 ${formatCompact(life.salary)} 入個人資金`
@@ -1175,7 +1244,7 @@ function Play({
           </div>
           <div className="mt-4">
             <Spark points={life.history} />
-            <p className="text-xs text-muted">曲線是美元市值，每一格一個點。轉板不會造成假跳空。</p>
+            <p className="text-xs text-muted">曲線是美元股價，每一格一個點。轉板不會造成假跳空。</p>
           </div>
         </div>
         <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
@@ -1191,13 +1260,13 @@ function Play({
           </p>
           <div className="mt-4 space-y-3">
             <Meter label="滿足度" value={satisfaction(life)} />
-            <Meter label="心理" value={life.mind ?? 50} />
-            <Meter label="健康" value={life.health} />
-            <Meter label="家庭" value={life.kin ?? 50} />
-            <Meter label="社會" value={life.social ?? 50} />
+            <Meter label="生理" value={dims.body} />
+            <Meter label="心理" value={dims.mind} />
+            <Meter label="成就" value={dims.achieve} />
+            <Meter label="精神" value={dims.spirit} />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-muted">
-            股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。遇上大事，價格會先重重晃一下。
+            滿足度來自這四個向度。股價跟著滿足度走，也跟著這一世自己的市道。
           </p>
         </div>
       </div>
@@ -1231,9 +1300,11 @@ function Play({
               const chance = Math.round(choiceChance(life, choice) * 100);
               const moneyLine = choiceMoney(life, choice);
               const wage = (choice.jobUsd ?? 0) * market.fx;
+              const over = moneyLine.cost > 0.5 && (life.purse ?? 0) + debtRoom(life) + 0.5 < moneyLine.cost;
+              const short = !over && moneyLine.cost > 0.5 && (life.purse ?? 0) + 0.5 < moneyLine.cost;
               const money =
                 moneyLine.cost > 0
-                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}${(life.purse ?? 0) + 0.5 < moneyLine.cost ? " · 不夠記成負債" : ""}`
+                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`
                   : moneyLine.gain > 0
                     ? `進帳 ${formatMoney(moneyLine.gain)} ${market.ccy}${(life.debt ?? 0) > 1 ? " · 先還負債" : ""}`
                     : wage > 0
@@ -1290,7 +1361,6 @@ function Play({
           <p className="font-medium">
             {last.year} · {last.title}
             <span className={"ml-2 font-mono " + tone(last.pricePct)}>股價 {formatPct(last.pricePct)}</span>
-            <span className={"ml-2 font-mono " + tone(last.capPct)}>市值 {formatPct(last.capPct)}</span>
             {last.payNote ? <span className="ml-2 text-ivory">{last.payNote}</span> : null}
           </p>
         </div>
@@ -1375,7 +1445,6 @@ function Dead({
 }) {
   const market = countryById(life.countryId);
   const epi = epitaph(life);
-  const cap = life.price * life.shares;
   return (
     <section className="flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -1432,12 +1501,10 @@ function Dead({
         <dl className="grid content-start gap-4 rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
           <Stat k="終值股價" v={`${formatPrice(life.price)} ${market.ccy}`} />
           <Stat k="股價倍數" v={formatMultiple(priceMultiple(life))} />
-          <Stat k="終值市值" v={`${formatCompact(cap)} ${market.ccy}`} />
-          <Stat k="市值倍數" v={formatMultiple(capMultiple(life))} />
-          <Stat k="美元終值" v={`USD ${formatCompact(capUsd(life))}`} />
-          <Stat k="峰值市值" v={`USD ${formatCompact(life.peakCapUsd)}`} />
+          <Stat k="享年" v={`${life.age} 歲`} />
+          {(life.debt ?? 0) > 1 && <Stat k="負債" v={`${formatMoney(life.debt ?? 0)} ${market.ccy}`} />}
           <p className="text-xs leading-relaxed text-muted">
-            分數同時看美元市值、相對開盤的倍數，以及你活了多久。出身很重，但把一隻仙股做成成長股，仍然算數。
+            分數看你活了多久，以及股價相對開盤走了多遠。
           </p>
         </dl>
       </div>
@@ -1467,8 +1534,8 @@ function Board({ rows, onBack }: { rows: RunRecord[]; onBack: () => void }) {
               <span className="text-sm text-muted">
                 {countryById(row.countryId).name} · {row.age}歲
               </span>
-              <span className="font-mono text-sm">USD {formatCompact(row.capUsd)}</span>
-              <span className="font-mono text-sm">{formatMultiple(row.capMult)}</span>
+              <span className="font-mono text-sm">股價 {formatMultiple(row.priceMult)}</span>
+              <span className="text-sm text-muted">{row.cause}</span>
               <span className="text-sm">
                 {row.grade}
                 <span className="ml-2 font-mono text-gold">{row.score}</span>

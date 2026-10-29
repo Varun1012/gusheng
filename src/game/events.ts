@@ -107,7 +107,7 @@ export const EVENTS: GameEvent[] = [
     id: "eighteen",
     anchorAge: 18,
     title: "大學選科",
-    body: "{year}年，{name}十八歲。{headline}。讀不讀、讀哪一科，學費從個人資金扣。這筆錢跟股票無關。不夠的差額記成負債。",
+    body: "{year}年，{name}十八歲。{headline}。讀，或者先去工作。學費從個人資金扣。不夠的差額記成負債，負債最多一萬美元。",
     choices: [
       {
         label: "讀商科",
@@ -1694,7 +1694,7 @@ export const EVENTS: GameEvent[] = [
     minAge: 18,
     weight: 1.8,
     when: (life) => (life.birthYear + life.age) % 4 === 0,
-    body: "{year}年有選舉。投票不用錢，走路去就行。自己參選要付選舉開支，從個人資金扣。",
+    body: "{year}年有選舉。投票不用錢。自己參選要付選舉開支，不夠的差額記成負債，但負債最多一萬美元。",
     choices: [
       {
         label: "去投票",
@@ -1706,23 +1706,7 @@ export const EVENTS: GameEvent[] = [
         reputation: 1,
       },
       {
-        label: "不去",
-        detail: "那天留給自己",
-        exposure: "cash",
-        price: 0.01,
-        social: -3,
-        mind: -1,
-      },
-      {
-        label: "去看看，不排隊",
-        detail: "人到了，票沒投",
-        exposure: "human",
-        price: 0.01,
-        social: 1,
-        mind: 1,
-      },
-      {
-        label: "自己參選：街站和單張",
+        label: "自己參選",
         detail: "街站、單張、來回車錢",
         exposure: "human",
         price: 0.03,
@@ -1732,19 +1716,6 @@ export const EVENTS: GameEvent[] = [
         social: 8,
         reputation: 6,
         mind: -2,
-      },
-      {
-        label: "自己參選：全區造勢",
-        detail: "造勢、廣告",
-        exposure: "diversify",
-        price: 0.05,
-        spendUsd: 4800,
-        needFull: true,
-        seekOffice: true,
-        social: 12,
-        reputation: 10,
-        mind: -4,
-        health: -1,
       },
     ],
   },

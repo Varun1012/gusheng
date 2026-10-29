@@ -1,4 +1,4 @@
-export type ThemeId = "hall" | "bull" | "bear" | "night";
+export type ThemeId = "day" | "low";
 
 export interface MusicPrefs {
   music: boolean;
@@ -9,17 +9,15 @@ export interface MusicPrefs {
 }
 
 export const MUSIC_THEMES: { id: ThemeId; name: string }[] = [
-  { id: "hall", name: "開市" },
-  { id: "bull", name: "牛市" },
-  { id: "bear", name: "熊市" },
-  { id: "night", name: "夜盤" },
+  { id: "day", name: "日常" },
+  { id: "low", name: "低潮" },
 ];
 
 export const DEFAULT_MUSIC: MusicPrefs = {
   music: true,
   sfx: true,
   volume: 0.55,
-  theme: "hall",
+  theme: "day",
 };
 
 const STORAGE = "gusheng.music.v1";
@@ -30,45 +28,30 @@ interface ThemeDef {
   semis: number[];
   pattern: number[];
   fifth: number;
+  third: number;
   cutoff: number;
   wave: OscillatorType;
 }
 
 const THEME: Record<ThemeId, ThemeDef> = {
-  hall: {
-    root: 220,
-    bpm: 76,
-    semis: [0, 2, 4, 7, 9, 12],
-    pattern: [0, 2, 4, 2, 3, 2, 4, 1, 0, 2, 3, 4, 2, 1, 0, 4],
-    fifth: 1.498,
-    cutoff: 1400,
-    wave: "triangle",
-  },
-  bull: {
-    root: 261.63,
-    bpm: 104,
+  day: {
+    root: 246.94,
+    bpm: 96,
     semis: [0, 2, 4, 7, 9, 12, 14, 16],
-    pattern: [0, 2, 4, 5, 4, 2, 6, 7, 5, 4, 6, 7, 5, 3, 2, 0],
-    fifth: 1.5,
-    cutoff: 2200,
+    pattern: [0, 2, 4, 7, 4, 2, 5, 4, 0, 3, 5, 7, 5, 2, 4, 0],
+    fifth: 1.498,
+    third: 1.26,
+    cutoff: 2100,
     wave: "triangle",
   },
-  bear: {
+  low: {
     root: 164.81,
-    bpm: 52,
-    semis: [0, 1, 5, 7, 10, 12],
-    pattern: [0, -1, 2, -1, 1, -1, 3, -1, 0, -1, 4, -1, 2, -1, 1, -1],
-    fifth: 1.498,
-    cutoff: 680,
-    wave: "sine",
-  },
-  night: {
-    root: 196,
     bpm: 64,
     semis: [0, 3, 5, 7, 10, 12, 15],
-    pattern: [0, -1, 2, -1, -1, 4, -1, 3, -1, -1, 1, -1, 5, -1, -1, 0],
-    fifth: 2,
-    cutoff: 900,
+    pattern: [0, 2, -1, 4, 1, -1, 3, 5, 0, -1, 2, 4, -1, 1, 3, 0],
+    fifth: 1.498,
+    third: 1.189,
+    cutoff: 980,
     wave: "sine",
   },
 };
@@ -80,12 +63,13 @@ let ctx: AudioContext | null = null;
 let musicGain: GainNode | null = null;
 let padA: OscillatorNode | null = null;
 let padB: OscillatorNode | null = null;
+let padC: OscillatorNode | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let step = 0;
 let nextTime = 0;
 
 function isTheme(id: string): id is ThemeId {
-  return id === "hall" || id === "bull" || id === "bear" || id === "night";
+  return id === "day" || id === "low";
 }
 
 export function loadMusic(): MusicPrefs {
@@ -98,7 +82,7 @@ export function loadMusic(): MusicPrefs {
       music: parsed.music !== false,
       sfx: parsed.sfx !== false,
       volume: clampVol(parsed.volume),
-      theme: parsed.theme && isTheme(parsed.theme) ? parsed.theme : "hall",
+      theme: parsed.theme && isTheme(parsed.theme) ? parsed.theme : "day",
     };
   } catch {
     return { ...DEFAULT_MUSIC };
@@ -157,30 +141,37 @@ function ensurePads() {
   const theme = THEME[prefs.theme];
   const filter = audio.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 420;
+  filter.frequency.value = 520;
   const gain = audio.createGain();
-  gain.gain.value = 0.55;
+  gain.gain.value = 0.42;
   padA = audio.createOscillator();
   padB = audio.createOscillator();
+  padC = audio.createOscillator();
   padA.type = "sine";
   padB.type = "sine";
+  padC.type = "triangle";
   padA.frequency.value = theme.root / 2;
   padB.frequency.value = (theme.root / 2) * theme.fifth;
+  padC.frequency.value = (theme.root / 2) * theme.third;
   padA.connect(filter);
   padB.connect(filter);
+  padC.connect(filter);
   filter.connect(gain).connect(musicGain);
   padA.start();
   padB.start();
+  padC.start();
 }
 
 function retunePads() {
-  if (!ctx || !padA || !padB) return;
+  if (!ctx || !padA || !padB || !padC) return;
   const theme = THEME[prefs.theme];
   const now = ctx.currentTime;
   padA.frequency.cancelScheduledValues(now);
   padB.frequency.cancelScheduledValues(now);
+  padC.frequency.cancelScheduledValues(now);
   padA.frequency.exponentialRampToValueAtTime(Math.max(40, theme.root / 2), now + 0.4);
   padB.frequency.exponentialRampToValueAtTime(Math.max(40, (theme.root / 2) * theme.fifth), now + 0.4);
+  padC.frequency.exponentialRampToValueAtTime(Math.max(40, (theme.root / 2) * theme.third), now + 0.45);
 }
 
 function playTone(time: number, freq: number, dur: number, amp: number, wave: OscillatorType, cutoff: number) {
@@ -203,15 +194,22 @@ function playTone(time: number, freq: number, dur: number, amp: number, wave: Os
 
 function schedule(index: number, time: number) {
   const theme = THEME[prefs.theme];
-  const degree = theme.pattern[index % theme.pattern.length] ?? -1;
-  if (index % 8 === 0) {
-    playTone(time, theme.root / 2, 0.9, 0.22, "sine", 500);
+  const beat = index % 16;
+  if (beat % 4 === 0) playTone(time, theme.root / 4, 0.46, 0.2, "sine", 280);
+  if (beat % 8 === 0) {
+    playTone(time, theme.root / 2, 1.05, 0.1, "sine", 760);
+    playTone(time, (theme.root / 2) * theme.fifth, 1.05, 0.07, "triangle", 980);
+    playTone(time, (theme.root / 2) * theme.third, 0.9, 0.05, "sine", 1200);
   }
-  if (degree < 0) return;
-  const semi = theme.semis[degree] ?? 0;
-  const freq = theme.root * 2 ** (semi / 12);
-  const busy = theme.pattern.filter((n) => n >= 0).length > 10;
-  playTone(time, freq, busy ? 0.28 : 0.7, 0.34, theme.wave, theme.cutoff);
+  if (beat % 2 === 0) playTone(time, theme.root * 8, 0.04, 0.035, "square", 4200);
+  const degree = theme.pattern[beat] ?? -1;
+  if (degree >= 0) {
+    const semi = theme.semis[degree] ?? 0;
+    const freq = theme.root * 2 ** (semi / 12);
+    playTone(time, freq, theme.bpm > 80 ? 0.28 : 0.55, 0.2, theme.wave, theme.cutoff);
+    if (beat % 4 === 2) playTone(time, freq / theme.fifth, 0.42, 0.07, "triangle", theme.cutoff * 0.7);
+  }
+  if (beat === 12) playTone(time, theme.root * 2, 0.5, 0.045, "sine", 2400);
 }
 
 function tick() {
@@ -250,7 +248,7 @@ export function configureMusic(next: MusicPrefs) {
     music: next.music,
     sfx: next.sfx,
     volume: clampVol(next.volume),
-    theme: isTheme(next.theme) ? next.theme : "hall",
+    theme: isTheme(next.theme) ? next.theme : "day",
   };
   persist(prefs);
   if (!unlocked) return;
@@ -312,5 +310,29 @@ export function toll() {
     osc.connect(gain).connect(audio.destination);
     osc.start(time);
     osc.stop(time + 1.15);
+  });
+}
+
+export function verdictSound(ok: boolean) {
+  if (!prefs.sfx) return;
+  const audio = sfxContext();
+  if (!audio) return;
+  const now = audio.currentTime + 0.02;
+  const notes = ok ? [523.25, 659.25, 783.99, 1046.5] : [349.23, 311.13, 246.94, 196];
+  notes.forEach((freq, i) => {
+    const time = now + i * (ok ? 0.08 : 0.12);
+    const osc = audio.createOscillator();
+    const filter = audio.createBiquadFilter();
+    const gain = audio.createGain();
+    osc.type = ok ? "triangle" : "sawtooth";
+    osc.frequency.setValueAtTime(freq, time);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(ok ? 2400 : 700, time);
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(ok ? 0.07 : 0.05, time + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + (ok ? 0.28 : 0.42));
+    osc.connect(filter).connect(gain).connect(audio.destination);
+    osc.start(time);
+    osc.stop(time + 0.5);
   });
 }
