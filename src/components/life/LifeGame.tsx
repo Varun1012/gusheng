@@ -22,7 +22,6 @@ import {
   advance,
   buyHome,
   chairCost,
-  choiceChance,
   choiceMoney,
   choose,
   debtRoom,
@@ -312,7 +311,7 @@ export function LifeGame() {
     const step = acceptChoice(life, index);
     const after = dimensions(step.life);
     const detail = step.report?.detail || step.life.plan?.detail || "";
-    const ok = detail.includes("成了");
+    const ok = Boolean(step.report?.choiceOk ?? step.life.plan?.choiceOk);
     verdictSound(ok);
     setQuoting(false);
     setVerdict({ ok, label, detail, shifts: shiftRows(before, after), next: step.life, report: step.report });
@@ -489,7 +488,6 @@ export function LifeGame() {
               setLife(next);
               if (music.sfx) blip(next.price >= before);
             }}
-            onChoose={(index) => act(index)}
             quoting={quoting}
             onToggleQuote={() => setQuoting((v) => !v)}
             onFinishYear={finishYear}
@@ -513,6 +511,9 @@ export function LifeGame() {
         )}
 
         {phase === "board" && <Board rows={board} onBack={() => setPhase(returnTo)} />}
+        {phase === "play" && life?.plan?.eventId && !life.plan.committed && (
+          <ChoiceDialog life={life} onChoose={act} />
+        )}
         {verdict && (
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4">
             <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-line bg-panel p-6">
@@ -530,9 +531,12 @@ export function LifeGame() {
                   </li>
                 ))}
               </ul>
-              {verdict.detail ? <p className="mt-4 text-sm leading-relaxed text-muted">{verdict.detail}</p> : null}
+              {verdict.detail && verdict.detail !== verdict.label ? (
+                <p className="mt-4 text-sm leading-relaxed text-muted">{verdict.detail}</p>
+              ) : null}
               <button
                 type="button"
+                autoFocus
                 onClick={dismissVerdict}
                 className="mt-5 min-h-11 w-full rounded-xl bg-gold px-4 py-3 font-medium text-ink"
               >
@@ -769,7 +773,7 @@ function Title({
             <li>六種基本政策隨時可換。換一套，四個向度會跟著偏，滿足度也跟著偏。</li>
             <li>滿足度來自生理、心理、成就、精神。股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。</li>
             <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
-            <li>重大抉擇一年一兩次，也可以一次都沒有。每次只有兩項。選完會告訴你正確還是錯誤，以及四個向度怎麼動。</li>
+            <li>重大抉擇一年一兩次，也可以一次都沒有。兩項裡一個是對的、一個是錯的，沒有成算。視窗會直接彈出。選完告訴你對還是錯，以及四個向度怎麼動。</li>
             <li>興趣只能定一門，定了就一直做。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
             <li>負債年利率一成。不夠的差額記成負債，最多一萬美元。滾到五萬美元，這一世結束。</li>
@@ -1144,6 +1148,78 @@ function SpendRow({
   );
 }
 
+function choiceCaption(life: Life, choice: ReturnType<typeof currentChoices>[number], ccy: string): string {
+  const moneyLine = choiceMoney(life, choice);
+  const wage = (choice.jobUsd ?? 0) * countryById(life.countryId).fx;
+  const over = moneyLine.cost > 0.5 && (life.purse ?? 0) + debtRoom(life) + 0.5 < moneyLine.cost;
+  const short = !over && moneyLine.cost > 0.5 && (life.purse ?? 0) + 0.5 < moneyLine.cost;
+  if (moneyLine.cost > 0) {
+    return `扣 ${formatMoney(moneyLine.cost)} ${ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`;
+  }
+  if (moneyLine.gain > 0) {
+    return `進帳 ${formatMoney(moneyLine.gain)} ${ccy}${(life.debt ?? 0) > 1 ? " · 先還負債" : ""}`;
+  }
+  if (wage > 0) return `職業每年 ${formatMoney(wage)} ${ccy}`;
+  return "";
+}
+
+function ChoiceDialog({ life, onChoose }: { life: Life; onChoose: (index: number) => void }) {
+  const market = countryById(life.countryId);
+  const event = currentEventCopy(life);
+  const choices = currentChoices(life);
+  const first = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    first.current?.focus();
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  if (!event || choices.length === 0) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center bg-ink/80 px-4 py-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="choice-title"
+    >
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gold/50 bg-panel">
+        <div className="overflow-auto px-5 pt-5 sm:px-6 sm:pt-6">
+          <p className="text-xs text-gold">
+            {event.facet ? `重大抉擇 · ${FACET_NAME[event.facet]}` : "重大抉擇"} · {life.age}歲 · 這一刻
+          </p>
+          <h2 id="choice-title" className="mt-1 font-serif text-2xl">
+            {event.title}
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted">{event.body}</p>
+          <p className="mt-3 text-xs text-muted">沒有成算。選完才知道對還是錯。</p>
+        </div>
+        <div className="grid gap-2 px-5 py-5 sm:px-6">
+          {choices.map((choice, index) => {
+            const caption = choiceCaption(life, choice, market.ccy);
+            return (
+              <button
+                key={choice.label}
+                type="button"
+                ref={index === 0 ? first : undefined}
+                onClick={() => onChoose(index)}
+                className="min-h-14 rounded-xl border border-line bg-panel-2 px-4 py-3 text-left transition hover:border-gold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold"
+              >
+                <span className="block text-base font-medium">{choice.label}</span>
+                {caption ? <span className="mt-1 block text-xs text-muted">{caption}</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Play({
   life,
   reports,
@@ -1154,7 +1230,6 @@ function Play({
   onChair,
   onBuyHome,
   onSellHome,
-  onChoose,
   quoting,
   onToggleQuote,
   onFinishYear,
@@ -1168,7 +1243,6 @@ function Play({
   onChair: () => void;
   onBuyHome: (mode: "cash" | "mortgage") => void;
   onSellHome: () => void;
-  onChoose: (index: number) => void;
   quoting: boolean;
   onToggleQuote: () => void;
   onFinishYear: () => void;
@@ -1176,7 +1250,6 @@ function Play({
   const market = countryById(life.countryId);
   const plan = life.plan!;
   const event = currentEventCopy(life);
-  const choices = currentChoices(life);
   const dims = dimensions(life);
   const last = reports[reports.length - 1];
 
@@ -1289,44 +1362,18 @@ function Play({
       />
 
       {event ? (
-        <div className="rounded-2xl border border-gold/50 bg-panel p-5">
-          <p className="text-xs text-gold">
-            {event.facet ? `重大抉擇 · ${FACET_NAME[event.facet]}` : "重大抉擇"} · {life.age}歲 · 這一刻
-          </p>
-          <h2 className="mt-1 font-serif text-2xl">{event.title}</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{event.body}</p>
-          <div className="mt-4 grid gap-2">
-            {choices.map((choice, index) => {
-              const chance = Math.round(choiceChance(life, choice) * 100);
-              const moneyLine = choiceMoney(life, choice);
-              const wage = (choice.jobUsd ?? 0) * market.fx;
-              const over = moneyLine.cost > 0.5 && (life.purse ?? 0) + debtRoom(life) + 0.5 < moneyLine.cost;
-              const short = !over && moneyLine.cost > 0.5 && (life.purse ?? 0) + 0.5 < moneyLine.cost;
-              const money =
-                moneyLine.cost > 0
-                  ? `扣 ${formatMoney(moneyLine.cost)} ${market.ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`
-                  : moneyLine.gain > 0
-                    ? `進帳 ${formatMoney(moneyLine.gain)} ${market.ccy}${(life.debt ?? 0) > 1 ? " · 先還負債" : ""}`
-                    : wage > 0
-                      ? `職業每年 ${formatMoney(wage)} ${market.ccy}`
-                      : "";
-              return (
-                <button
-                  key={choice.label}
-                  type="button"
-                  onClick={() => onChoose(index)}
-                  className="min-h-11 rounded-xl border border-line bg-panel-2 px-4 py-3 text-left transition hover:border-gold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold"
-                >
-                  <span className="block text-sm font-medium">
-                    {index + 1}. {choice.label}
-                  </span>
-                  <span className="mt-1 block text-xs text-muted">
-                    成算 {chance}%{money ? ` · ${money}` : ""}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <div className="rounded-2xl border border-line bg-panel p-5">
+          <h2 className="font-serif text-2xl">要做個選擇</h2>
+          <p className="mt-2 text-sm leading-relaxed text-muted">視窗已經彈出。選完，這一格才會過去。</p>
+          {(plan.recent ?? []).length > 0 && (
+            <ul className="mt-3 space-y-1">
+              {(plan.recent ?? []).map((line, index, all) => (
+                <li key={`${line}-${index}`} className={index === all.length - 1 ? "text-sm text-ivory" : "text-sm text-muted"}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : (
         <div className="rounded-2xl border border-line bg-panel p-5">

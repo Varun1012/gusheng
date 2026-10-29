@@ -118,6 +118,8 @@ export interface YearPlan {
   roll?: number;
   relistedTo?: string;
   payNote?: string;
+  /** True when the player picked the right option. Not a dice roll. */
+  choiceOk?: boolean;
 }
 
 export interface BirthInput {
@@ -230,4 +232,6 @@ export interface Report {
   cause?: string;
   /** Outcome only: the board set or changed pay. No formula. */
   payNote?: string;
+  /** True when the player picked the right option. */
+  choiceOk?: boolean;
 }
