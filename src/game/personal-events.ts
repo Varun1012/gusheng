@@ -745,7 +745,6 @@ export const PERSONAL_EVENTS: GameEvent[] = [
 /** Heavy enough to stop the year. Smaller frictions stay in the spend column. */
 const MAJOR_IDS = new Set([
   "who_holds",
-  "child_fever",
   "family_shop",
   "factory_child",
   "parents_row",
@@ -760,10 +759,15 @@ const MAJOR_IDS = new Set([
   "work_injury",
   "family_secret",
   "funeral",
-  "own_child_sick",
   "adult_hustle",
 ]);
 
+const DROP_IDS = new Set(["child_fever", "see_doctor", "toothache", "own_child_sick", "appetite", "body_bill"]);
+for (let i = PERSONAL_EVENTS.length - 1; i >= 0; i -= 1) {
+  if (DROP_IDS.has(PERSONAL_EVENTS[i]!.id)) PERSONAL_EVENTS.splice(i, 1);
+}
+
 for (const event of PERSONAL_EVENTS) {
+  event.repeat = false;
   if (MAJOR_IDS.has(event.id)) event.major = true;
 }

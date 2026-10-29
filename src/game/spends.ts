@@ -194,7 +194,6 @@ export function spendOpen(
   fx: number,
 ): boolean {
   if (!spendVisible(item, life.age)) return false;
-  if (item.group === "hobby" && life.hobby) return life.hobby === item.id;
   if (item.group !== "hobby" && (life.spentKey ?? "") === spendCellKey(life)) return false;
   return true;
 }

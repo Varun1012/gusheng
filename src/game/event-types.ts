@@ -65,6 +65,10 @@ export interface GameEvent {
   cooldown?: number;
   /** Pauses the year. Everyday frictions stay off this list. */
   major?: boolean;
+  /** Must be answered before the road can branch. Comes ahead of other questions. */
+  gate?: boolean;
+  /** Follows a road already taken. Asked once, in order, and preferred over loose questions. */
+  thread?: boolean;
   /** A sharp economic print. Flavor may recall a real episode; the year does not. */
   shock?: boolean;
   /** Immediate price gap before the choice tilts it. Negative is a hit. */

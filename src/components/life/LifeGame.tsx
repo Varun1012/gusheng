@@ -12,6 +12,7 @@ import {
   ScrollText,
   Shield,
 } from "lucide-react";
+import { CAREER_LABEL } from "@/game/career-events";
 import { COUNTRIES, birthOdds, countryById } from "@/game/countries";
 import {
   beginYear,
@@ -310,11 +311,12 @@ export function LifeGame() {
     const label = currentChoices(life)[index]?.label ?? "";
     const step = acceptChoice(life, index);
     const after = dimensions(step.life);
+    const shifts = shiftRows(before, after);
     const detail = step.report?.detail || step.life.plan?.detail || "";
-    const ok = Boolean(step.report?.choiceOk ?? step.life.plan?.choiceOk);
+    const ok = shifts.reduce((sum, row) => sum + row.delta, 0) > 0;
     verdictSound(ok);
     setQuoting(false);
-    setVerdict({ ok, label, detail, shifts: shiftRows(before, after), next: step.life, report: step.report });
+    setVerdict({ ok, label, detail, shifts, next: step.life, report: step.report });
   }
 
   function dismissVerdict() {
@@ -517,9 +519,7 @@ export function LifeGame() {
         {verdict && (
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4">
             <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-line bg-panel p-6">
-              <p className={"font-serif text-4xl " + (verdict.ok ? "text-gold" : "text-ivory")}>
-                {verdict.ok ? "正確選擇" : "錯誤選擇"}
-              </p>
+              <p className="font-serif text-3xl text-ivory">這一選</p>
               {verdict.label ? <p className="mt-2 text-sm text-muted">{verdict.label}</p> : null}
               <ul className="mt-5 space-y-2">
                 {verdict.shifts.map((row) => (
@@ -531,6 +531,7 @@ export function LifeGame() {
                   </li>
                 ))}
               </ul>
+              <p className="mt-4 text-sm text-muted">{verdict.ok ? "四個向度合起來往上。" : "四個向度合起來沒有往上。"}</p>
               {verdict.detail && verdict.detail !== verdict.label ? (
                 <p className="mt-4 text-sm leading-relaxed text-muted">{verdict.detail}</p>
               ) : null}
@@ -773,8 +774,9 @@ function Title({
             <li>六種基本政策隨時可換。換一套，四個向度會跟著偏，滿足度也跟著偏。</li>
             <li>滿足度來自生理、心理、成就、精神。股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。</li>
             <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
-            <li>重大抉擇一年一兩次，也可以一次都沒有。兩項裡一個是對的、一個是錯的，沒有成算。視窗會直接彈出。選完告訴你對還是錯，以及四個向度怎麼動。</li>
-            <li>興趣只能定一門，定了就一直做。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
+            <li>重大抉擇一年一兩次，也可以一次都沒有。選項不限兩項，也不分對錯。視窗會直接彈出。選完看四個向度怎麼動。合起來往上，聲音是一種；沒有往上，是另一種。</li>
+            <li>題目跟著已經走上的仕途往下問，同一件事不會再問。路可以在中途換。</li>
+            <li>興趣同時只專注一門，但可以換。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
             <li>負債年利率一成。不夠的差額記成負債，最多一萬美元。滾到五萬美元，這一世結束。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
@@ -962,13 +964,13 @@ function SpendColumn({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-serif text-2xl">個人花錢</h2>
         <p className="text-xs text-muted">
-          {hobby ? `這一門：${hobby.label}` : "還沒選定興趣"}
+          {hobby ? `正在專注：${hobby.label}` : "還沒選定興趣"}
           {doing ? ` · 正在做的：${doing}` : ""}
-          {life.career ? ` · 職業已定` : ""}
+          {life.career ? ` · 仕途：${CAREER_LABEL[life.career] ?? life.career}` : ""}
         </p>
       </div>
       <p className="mt-2 text-sm text-ivory">
-        {life.statusNote || "興趣只能定一門，定了就一直做。"}
+        {life.statusNote || "興趣同時只專注一門，想換就換。"}
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
         零工和投資其他公司，每一格一筆。錢不夠會記成負債。負債最多一萬美元，年利率一成。
@@ -978,7 +980,7 @@ function SpendColumn({
       ) : (
         <>
           {hobbies.length > 0 && (
-            <SpendRow title="興趣 · 一年一門" items={hobbies} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />
+            <SpendRow title="興趣 · 專注一門，可以換" items={hobbies} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />
           )}
           {investments.length > 0 && (
             <SpendRow title="投資其他公司" items={investments} life={life} fx={fx} ccy={ccy} onSpend={onSpend} />
@@ -1111,21 +1113,18 @@ function SpendRow({
         {items.map((item) => {
           const open = spendOpen(item, life, fx);
           const hobbyOn = item.group === "hobby" && life.hobby === item.id;
-          const lockedOut = item.group === "hobby" && Boolean(life.hobby) && life.hobby !== item.id;
           const workOn = Boolean(item.work && life.work === item.work);
           const cost = item.usd * fx;
           const chance = item.invest ? Math.round(investChance(life, item.invest.lean) * 100) : null;
           const over = cost > 0.5 && life.purse + debtRoom(life) + 0.5 < cost;
           const short = !over && cost > 0.5 && life.purse + 0.5 < cost;
           const sub = hobbyOn
-            ? "一直在做"
-            : lockedOut
-              ? "只能一門"
-              : item.usd <= 0
-                ? "不用錢"
-                : chance !== null
-                  ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`
-                  : `扣 ${formatMoney(cost)} ${ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`;
+            ? "正在專注"
+            : item.usd <= 0
+              ? "不用錢"
+              : chance !== null
+                ? `扣 ${formatMoney(cost)} ${ccy} · 成算 ${chance}%${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`
+                : `扣 ${formatMoney(cost)} ${ccy}${over ? " · 超過負債上限" : short ? " · 不夠記成負債" : ""}`;
           return (
             <button
               key={item.id}
@@ -1187,18 +1186,15 @@ function ChoiceDialog({ life, onChoose }: { life: Life; onChoose: (index: number
       aria-modal="true"
       aria-labelledby="choice-title"
     >
-      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gold/50 bg-panel">
-        <div className="overflow-auto px-5 pt-5 sm:px-6 sm:pt-6">
-          <p className="text-xs text-gold">
-            {event.facet ? `重大抉擇 · ${FACET_NAME[event.facet]}` : "重大抉擇"} · {life.age}歲 · 這一刻
-          </p>
-          <h2 id="choice-title" className="mt-1 font-serif text-2xl">
-            {event.title}
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-muted">{event.body}</p>
-          <p className="mt-3 text-xs text-muted">沒有成算。選完才知道對還是錯。</p>
-        </div>
-        <div className="grid gap-2 px-5 py-5 sm:px-6">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl border border-gold/50 bg-panel px-5 py-5 sm:px-6">
+        <p className="text-xs text-gold">
+          {event.facet ? `重大抉擇 · ${FACET_NAME[event.facet]}` : "重大抉擇"} · {life.age}歲 · 這一刻
+        </p>
+        <h2 id="choice-title" className="mt-1 font-serif text-2xl">
+          {event.title}
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-muted">{event.body}</p>
+        <div className="mt-4 grid gap-2">
           {choices.map((choice, index) => {
             const caption = choiceCaption(life, choice, market.ccy);
             return (

@@ -1,4 +1,5 @@
 import type { ChoiceDef, GameEvent } from "@/game/event-types";
+import { CAREER_EVENTS } from "@/game/career-events";
 import { childCount } from "@/game/household";
 import { PERSONAL_EVENTS } from "@/game/personal-events";
 import { SHOCK_EVENTS } from "@/game/shock-events";
@@ -105,7 +106,10 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: "eighteen",
-    anchorAge: 18,
+    gate: true,
+    minAge: 18,
+    maxAge: 26,
+    when: (life) => !life.major,
     title: "大學選科",
     body: "{year}年，{name}十八歲。{headline}。讀，或者先去工作。學費從個人資金扣。不夠的差額記成負債，負債最多一萬美元。",
     choices: [
@@ -172,8 +176,10 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: "first_job",
-    anchorAge: 22,
-    title: "職業選擇",
+    gate: true,
+    minAge: 22,
+    when: (life) => !life.career,
+    title: "走上哪一條仕途",
     body: "{year}年，{headline}。這一份是你自己的職業，收入進個人資金。股票的主席薪酬是另一筆，要買回股票才拿得到。",
     choices: [
       {
@@ -247,7 +253,8 @@ export const EVENTS: GameEvent[] = [
   },
   {
     id: "housing",
-    anchorAge: 30,
+    minAge: 30,
+    maxAge: 55,
     when: (life) => !life.flags.home,
     title: "要不要買房子",
     body: "{year}年，{country}。{headline}。樓價從個人資金扣。付三成之後每年還要供。不夠的差額記成負債。",
@@ -573,38 +580,6 @@ export const EVENTS: GameEvent[] = [
         price: 0.04,
         kin: 2,
         mind: 2,
-      },
-    ],
-  },
-  {
-    id: "illness",
-    minAge: 8,
-    weight: 1.3,
-    title: "身體發出一則盈利警告",
-    body: "檢查報告不好看。{year}年的醫療價格，反映的是{country}的制度，不是你的意志。",
-    choices: [
-      {
-        label: "用最好的治療",
-        detail: "現金出去，死亡率下來",
-        exposure: "health",
-        price: 0.05,
-        health: 14,
-        leverage: 0.06,
-      },
-      {
-        label: "用公營或最便宜的方案",
-        detail: "保住現金，康復更慢",
-        exposure: "cash",
-        price: 0.07,
-        health: 4,
-      },
-      {
-        label: "拖著，先顧工作",
-        detail: "今年的盈利好看，曲線在後面",
-        exposure: "career",
-        price: 0.1,
-        health: -10,
-        reputation: 1,
       },
     ],
   },
@@ -1583,38 +1558,6 @@ export const EVENTS: GameEvent[] = [
     ],
   },
   {
-    id: "health_screen",
-    stages: ["late", "elder"],
-    weight: 1.5,
-    title: "年檢不給情面",
-    body: "醫生用很平的聲音說，之後每年的存活檢定會更嚴。{year}年，你{age}歲。",
-    choices: [
-      {
-        label: "照單治療，改掉習慣",
-        detail: "這是健康政策的實質內容",
-        exposure: "health",
-        price: 0.05,
-        health: 12,
-        leverage: 0.02,
-      },
-      {
-        label: "治療，但不改變工作",
-        detail: "藥在吃，夜也在熬",
-        exposure: "career",
-        price: 0.08,
-        health: 4,
-        reputation: 1,
-      },
-      {
-        label: "先拖一季",
-        detail: "有些指標不會等季報",
-        exposure: "cash",
-        price: 0.06,
-        health: -8,
-      },
-    ],
-  },
-  {
     id: "consult",
     stages: ["late"],
     weight: 1,
@@ -1752,6 +1695,7 @@ export const EVENTS: GameEvent[] = [
   },
   ...SHOCK_EVENTS,
   ...PERSONAL_EVENTS,
+  ...CAREER_EVENTS,
 ];
 
 for (const event of EVENTS) {

@@ -169,7 +169,7 @@ export interface Life {
   side: number;
   /** Kind of work the purse was last spent on. */
   work?: string;
-  /** The one hobby, kept for life. */
+  /** The hobby currently in focus. It can be switched. */
   hobby?: string;
   /** Calendar year of the focused hobby. */
   hobbyYear?: number;

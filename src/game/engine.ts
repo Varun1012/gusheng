@@ -298,8 +298,11 @@ function pickSlotEvent(life: Life): string | null {
   if (!plan.choiceSlots.includes(nextSlot)) return null;
   const pool = EVENTS.filter((event) => event.major && eligible(event, life, plan.regimeId));
   if (pool.length === 0) return null;
+  const gates = pool.filter((event) => event.gate).sort((a, b) => (a.minAge ?? 0) - (b.minAge ?? 0));
+  if (gates.length > 0) return gates[0]!.id;
   const anchors = pool.filter((event) => event.anchorAge === life.age);
-  const use = anchors.length > 0 ? anchors : pool;
+  const threads = pool.filter((event) => event.thread);
+  const use = anchors.length > 0 ? anchors : threads.length > 0 ? threads : pool;
   const weights = use.map((event) => ({ event, weight: tunedWeight(event, life) }));
   const total = weights.reduce((sum, item) => sum + item.weight, 0);
   let roll = draw(life) * total;
@@ -868,43 +871,11 @@ function debtLine(ccy: string, paid: number, borrowed: number, debt: number, lea
   return lead ? `${lead}。${tail}` : tail;
 }
 
-function choiceWeight(choice: ChoiceDef): number {
-  const lift =
-    (choice.health ?? 0) +
-    (choice.mind ?? 0) +
-    (choice.kin ?? 0) +
-    (choice.social ?? 0) +
-    (choice.human ?? 0) * 0.7 +
-    (choice.reputation ?? 0) * 0.35;
-  const drag = Math.max(0, choice.leverage ?? 0) * 24 + (choice.hazard ?? 0) * 40 + (choice.bustChance ?? 0) * 20;
-  return lift - drag;
-}
-
-/** One of the two options is right. The other is wrong. No dice. */
-function rightChoice(choices: ChoiceDef[]): ChoiceDef {
-  let best = choices[0]!;
-  let score = choiceWeight(best);
-  for (let i = 1; i < choices.length; i += 1) {
-    const next = choices[i]!;
-    const weight = choiceWeight(next);
-    if (weight > score) {
-      best = next;
-      score = weight;
-    }
-  }
-  return best;
-}
-
-function pairChoices<T>(choices: T[]): T[] {
-  if (choices.length <= 2) return choices;
-  return [choices[0]!, choices[choices.length - 1]!];
-}
-
 function applyChoice(life: Life, index: number): Report | null {
   const plan = life.plan;
   if (!plan || plan.age !== life.age) throw new Error("year is not planned");
   const event = plan.eventId ? eventById(plan.eventId) : undefined;
-  const shown = event ? pairChoices(event.choices) : [];
+  const shown = event ? event.choices : [];
   if (!event || index < 0 || index >= shown.length) throw new Error("choice required");
   const choice = shown[index]!;
   const priceBefore = life.price;
@@ -941,51 +912,42 @@ function applyChoice(life: Life, index: number): Report | null {
     margin = true;
   }
   const sharePct = choice.shares ?? 0;
-  const correct = choice === rightChoice(shown);
-  const granted = correct && !overCap;
-  plan.choiceOk = correct;
-  const tilt = (n?: number) => {
-    const value = n ?? 0;
-    if (correct || value <= 0) return value;
-    return -Math.max(1, Math.round(value * 0.45));
-  };
-  life.health = clamp(life.health + tilt(choice.health), 0, 100);
-  life.human = clamp(life.human + tilt(choice.human), 0, 100);
-  life.reputation = clamp(life.reputation + tilt(choice.reputation), 0, 100);
-  life.mind = clamp(life.mind + tilt(choice.mind), 0, 100);
-  life.kin = clamp(life.kin + tilt(choice.kin), 0, 100);
-  life.social = clamp(life.social + tilt(choice.social), 0, 100);
-  life.leverage = clamp(life.leverage + (granted ? (choice.leverage ?? 0) : Math.min(0, choice.leverage ?? 0)), 0, 0.94);
-  if (granted && choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
-  if (granted && choice.setFlags?.married === true) attachSpouse(life, () => draw(life));
-  if (granted && choice.setFlags?.married === false) partSpouse(life);
-  if (granted && choice.setFlags?.children === true) attachChild(life, () => draw(life));
-  if (choice.seekOffice) {
-    if (granted) life.flags = { ...life.flags, office: true };
-    else if (!correct) life.flags = { ...life.flags, office: false };
-  }
-  if (granted && choice.major) life.major = choice.major;
-  if (granted && choice.career) {
-    life.career = choice.career;
-    if (majorFits(life.major, choice.career)) {
-      life.mind = clamp(life.mind + 4, 0, 100);
-      life.human = clamp(life.human + 3, 0, 100);
+  const happens = !overCap;
+  if (!happens) pricePct = event.shock ? (event.shockBias ?? 0) : 0;
+  if (happens) {
+    life.health = clamp(life.health + (choice.health ?? 0), 0, 100);
+    life.human = clamp(life.human + (choice.human ?? 0), 0, 100);
+    life.reputation = clamp(life.reputation + (choice.reputation ?? 0), 0, 100);
+    life.mind = clamp(life.mind + (choice.mind ?? 0), 0, 100);
+    life.kin = clamp(life.kin + (choice.kin ?? 0), 0, 100);
+    life.social = clamp(life.social + (choice.social ?? 0), 0, 100);
+    life.leverage = clamp(life.leverage + (choice.leverage ?? 0), 0, 0.94);
+    if (choice.setFlags) life.flags = { ...life.flags, ...choice.setFlags };
+    if (choice.setFlags?.married === true) attachSpouse(life, () => draw(life));
+    if (choice.setFlags?.married === false) partSpouse(life);
+    if (choice.setFlags?.children === true) attachChild(life, () => draw(life));
+    if (choice.seekOffice) life.flags = { ...life.flags, office: true };
+    if (choice.major) life.major = choice.major;
+    if (choice.career) {
+      life.career = choice.career;
+      if (majorFits(life.major, choice.career)) {
+        life.mind = clamp(life.mind + 4, 0, 100);
+        life.human = clamp(life.human + 3, 0, 100);
+      }
     }
+    if (choice.jobUsd !== undefined) life.job = Math.max(0, choice.jobUsd * fxNow);
   }
-  if (granted && choice.jobUsd !== undefined) life.job = Math.max(0, choice.jobUsd * fxNow);
   tickStats(life);
   const satNow = satisfaction(life);
   pricePct += priceFromSatisfaction(satBefore, satNow);
-  pricePct = clamp(pricePct, -0.55, event.shock || correct ? 0.4 : 0);
-  if (!correct && !event.shock) pricePct = Math.min(pricePct, -0.01);
-  movePrice(life, pricePct, correct ? sharePct : Math.min(0, sharePct));
+  pricePct = clamp(pricePct, -0.55, 0.4);
+  movePrice(life, pricePct, happens ? sharePct : 0);
   if (event.shock && Math.abs(pricePct) > 0.02) {
     life.echo = { left: 3, drift: clamp(-pricePct * 0.28, -0.05, 0.05) };
   }
   const economic = life.price / priceBefore - 1;
   const bits = [`滿足度 ${Math.round(satNow)}，股價按這個改寫，結果 ${signed(economic)}`];
   if (bust) bits.push("對手方倒了，這筆變成虧損");
-  if (!correct) bits.push("選了錯誤的一項");
   if (margin) bits.push("槓桿觸發追繳");
   if (sharePct > 0.02) bits.push("流通股增發，每股被攤薄");
   if (sharePct < -0.02) bits.push("公司回購了一部分");
@@ -993,9 +955,11 @@ function applyChoice(life: Life, index: number): Report | null {
   plan.sharePct = sharePct;
   plan.title = event.title;
   plan.hadChoice = true;
-  if (event.repeat) life.cool = { ...(life.cool ?? {}), [event.id]: plan.year };
-  else if (!life.used.includes(event.id)) life.used.push(event.id);
-  if (granted && choice.relist) {
+  if (happens) {
+    if (event.repeat) life.cool = { ...(life.cool ?? {}), [event.id]: plan.year };
+    else if (!life.used.includes(event.id)) life.used.push(event.id);
+  }
+  if (happens && choice.relist) {
     const target = resolveRelist(life, choice.relist);
     if (target) {
       const fromName = countryById(life.countryId).name;
@@ -1004,7 +968,7 @@ function applyChoice(life: Life, index: number): Report | null {
       plan.explanation += `已從${fromName}轉板至${countryById(target).name}。美元股價連續，之後的死亡率改按當地計算。`;
     }
   }
-  if (choice.sideUsd !== undefined && (granted || choice.sideUsd === 0)) {
+  if (choice.sideUsd !== undefined && (happens || choice.sideUsd === 0)) {
     life.side = Math.max(0, choice.sideUsd * countryById(life.countryId).fx);
   }
   life.slot = plan.pendingSlot ?? (life.slot ?? 0) + 1;
@@ -1012,10 +976,10 @@ function applyChoice(life: Life, index: number): Report | null {
   const fx = countryById(life.countryId).fx;
   const ccy = countryById(life.countryId).ccy;
   const money: string[] = [];
-  const bought = buying && granted;
+  const bought = buying && happens;
   if (overCap) {
     money.push("負債最多只能記成一萬美元，這筆超過了，沒有辦成");
-  } else if (choice.house === "sell" && life.flags.home && granted) {
+  } else if (choice.house === "sell" && life.flags.home && happens) {
     const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
     const settled = pocket(life, equity);
     life.flags = { ...life.flags, home: false };
@@ -1052,9 +1016,8 @@ function applyChoice(life: Life, index: number): Report | null {
       debtLine(ccy, bill.paid, bill.borrowed, life.debt ?? 0, choice.seekOffice ? "選舉開支" : undefined),
     );
   }
-  if (choice.seekOffice && granted) money.push("當選，在任");
-  else if (choice.seekOffice && !correct) money.push("沒有當選");
-  if (granted && choice.gainUsd) {
+  if (choice.seekOffice && happens) money.push("當選，在任");
+  if (happens && choice.gainUsd) {
     const gained = choice.gainUsd * fx;
     const settled = pocket(life, gained);
     money.push(
@@ -1063,7 +1026,7 @@ function applyChoice(life: Life, index: number): Report | null {
         : `個人資金進了 ${formatMoney(gained)} ${ccy}`,
     );
   }
-  if (granted && choice.jobUsd !== undefined && (choice.jobUsd ?? 0) > 0) {
+  if (happens && choice.jobUsd !== undefined && (choice.jobUsd ?? 0) > 0) {
     money.push(`職業收入每年 ${formatMoney(life.job ?? 0)} ${ccy}，進個人資金`);
   }
   plan.detail = money.length > 0 ? `${choice.label}。${money.join("。")}` : choice.label;
@@ -1320,7 +1283,7 @@ export function spend(source: Life, id: string): Life {
   if (item.group === "hobby" && source.hobby === item.id) return source;
   const key = spendCellKey(source);
   if (item.group !== "hobby" && (source.spentKey ?? "") === key) return source;
-  if (item.group === "hobby" && source.hobby && source.hobby !== item.id) return source;
+  const switching = item.group === "hobby" && Boolean(source.hobby) && source.hobby !== item.id;
   const fx = countryById(source.countryId).fx;
   const ccy = countryById(source.countryId).ccy;
   const free = item.usd <= 0;
@@ -1366,7 +1329,15 @@ export function spend(source: Life, id: string): Life {
     life.hobbyYear = life.plan?.year ?? life.birthYear + life.age;
   }
   if (item.group !== "hobby") life.spentKey = key;
-  const tail = item.ease ? "工作放輕了" : item.work ? "這份工作換上了" : item.group === "hobby" ? "這門會一直做" : undefined;
+  const tail = item.ease
+    ? "工作放輕了"
+    : item.work
+      ? "這份工作換上了"
+      : item.group === "hobby"
+        ? switching
+          ? "換成專注這門"
+          : "開始專注這門"
+        : undefined;
   let note = describeMove(item.label, before, snapStats(life), false, tail);
   if (item.invest && invested !== null && bill && settled) {
     const owedThen = (life.debt ?? 0) + settled.repaid;
@@ -1508,7 +1479,7 @@ export function fastForward(source: Life): { life: Life; reports: Report[] } {
 export function currentChoices(life: Life): ChoiceDef[] {
   if (!life.plan?.eventId || life.plan.committed) return [];
   const event = eventById(life.plan.eventId);
-  return event ? pairChoices(event.choices) : [];
+  return event ? event.choices : [];
 }
 
 export function currentEventCopy(life: Life): { title: string; body: string; facet: string | null } | null {
