@@ -77,6 +77,34 @@ export interface LogLine {
   detail: string;
 }
 
+export type BallotVote = "for" | "against" | "abstain";
+export type BallotBar = "half" | "twoThirds";
+
+export interface DirectorBallot {
+  name: string;
+  vote: BallotVote;
+}
+
+export interface Resolution {
+  id: string;
+  kind: "seat" | "charter" | "merger" | "chair";
+  title: string;
+  detail: string;
+  bar: BallotBar;
+  votes: DirectorBallot[];
+  yes: number;
+  no: number;
+  abstain: number;
+  passed: boolean;
+}
+
+export interface BoardMeeting {
+  directors: string[];
+  items: Resolution[];
+  chair?: Resolution;
+  chairNote?: string;
+}
+
 export interface YearPlan {
   age: number;
   year: number;
@@ -120,9 +148,13 @@ export interface YearPlan {
   payNote?: string;
   /** True when the player picked the right option. Not a dice roll. */
   choiceOk?: boolean;
-  /** Board portrait for this year. Shown once. */
+  /** Board portrait for this year. Older lives only. */
   portrait?: string;
   reviewSeen?: boolean;
+  /** Five-year board ballots. Absent on other years. */
+  meeting?: BoardMeeting;
+  /** False while that ballot is still on screen. */
+  meetingSeen?: boolean;
 }
 
 export interface Ailment {
@@ -175,6 +207,10 @@ export interface Life {
   career?: string;
   /** True after they buy back stock and take the chair. */
   chairman?: boolean;
+  /** Last calendar year the chair rewrote the reported figures. */
+  booksYear?: number;
+  /** Charter: the board must see the figures before they go out. */
+  booksWatch?: boolean;
   /** Side income in local currency: child work, part-time, gigs. Any age. */
   side: number;
   /** Kind of work the purse was last spent on. */

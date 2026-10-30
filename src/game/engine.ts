@@ -1,6 +1,6 @@
 import { TIER_ORDER, countryById, pickCountryByBirth } from "@/game/countries";
 import { eventById, EVENTS } from "@/game/events";
-import { capUsd, formatMoney, formatMultiple, priceMultiple, priceUsd } from "@/game/format";
+import { capUsd, formatMoney, priceUsd } from "@/game/format";
 import { ageHousehold, attachChild, attachSpouse, partSpouse, seedHousehold } from "@/game/household";
 import { mortalityQx, naturalCause } from "@/game/mortality";
 import { childName, familyLine, personName, reticker, tickerOf } from "@/game/names";
@@ -18,9 +18,23 @@ import {
   spendCost,
 } from "@/game/spends";
 import { REGIME_DRIFT, REGIME_SCALAR, syncCycle } from "@/game/regimes";
-import { CAREER_LABEL } from "@/game/career-events";
 import type { ChoiceDef } from "@/game/event-types";
-import type { Ailment, BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId } from "@/game/types";
+import type {
+  Ailment,
+  BallotBar,
+  BallotVote,
+  BirthInput,
+  BoardMeeting,
+  DirectorBallot,
+  Exposure,
+  Life,
+  PolicyId,
+  RegimeId,
+  Report,
+  Resolution,
+  Stage,
+  TierId,
+} from "@/game/types";
 
 const TIER_STATS: Record<
   TierId,
@@ -91,6 +105,7 @@ function copy(life: Life): Life {
           ...life.plan,
           recent: life.plan.recent ? [...life.plan.recent] : undefined,
           choiceSlots: life.plan.choiceSlots ? [...life.plan.choiceSlots] : undefined,
+          meeting: life.plan.meeting ? cloneMeeting(life.plan.meeting) : undefined,
         }
       : null,
     cool: { ...(life.cool ?? {}) },
@@ -342,40 +357,187 @@ function maybeContract(life: Life) {
   life.ailment = ailment;
 }
 
-function boardPortrait(life: Life): string {
-  const dims = dimensions(life);
-  const ranked = [
-    ["生理", dims.body],
-    ["心理", dims.mind],
-    ["成就", dims.achieve],
-    ["精神", dims.spirit],
-  ] as const;
-  const order = [...ranked].sort((a, b) => b[1] - a[1]);
-  const thick = order[0]![0];
-  const thin = order[order.length - 1]![0];
-  const career = life.career ? (CAREER_LABEL[life.career] ?? life.career) : "";
-  const hobby = life.hobby ? spendById(life.hobby)?.label : "";
-  const lines = [
-    `股價衡量這一生走到哪。自上市 ${formatMultiple(priceMultiple(life))}。`,
-    `生理 ${Math.round(dims.body)}，心理 ${Math.round(dims.mind)}，成就 ${Math.round(dims.achieve)}，精神 ${Math.round(dims.spirit)}。`,
-    `潛力最厚的是${thick}。特質裡最薄的是${thin}。`,
-    career ? `仕途在${career}。路也可以在職位之外。` : "還沒有職位。路可以在職位之外。",
-  ];
-  if (hobby) lines.push(`正在專注${hobby}。`);
-  if (life.ailment) {
-    lines.push(`身上帶著${life.ailment.name}${life.ailment.managed ? "，正在照料" : "，還沒好好照料"}。`);
+function cloneMeeting(meeting: BoardMeeting): BoardMeeting {
+  const cloneItem = (item: Resolution): Resolution => ({
+    ...item,
+    votes: item.votes.map((vote) => ({ ...vote })),
+  });
+  return {
+    directors: [...meeting.directors],
+    items: meeting.items.map(cloneItem),
+    chair: meeting.chair ? cloneItem(meeting.chair) : undefined,
+    chairNote: meeting.chairNote,
+  };
+}
+
+function boardNames(life: Life, count: number, taken: Set<string>): string[] {
+  const names: string[] = [];
+  let guard = 0;
+  while (names.length < count && guard < 120) {
+    guard += 1;
+    const name = personName(life.countryId, () => draw(life));
+    if (taken.has(name) || names.includes(name)) continue;
+    names.push(name);
   }
-  if (dims.body < 40 && dims.mind < 40) {
-    lines.push("生心理一起低下去，被困住，往後的選擇會更痛。");
+  while (names.length < count) names.push(`董事${names.length + 1}`);
+  return names;
+}
+
+function rollVotes(life: Life, names: string[], lean: number): DirectorBallot[] {
+  const pFor = clamp(lean, 0.12, 0.78);
+  const pNo = clamp((1 - pFor) * 0.75, 0.08, 0.55);
+  return names.map((name) => {
+    const roll = draw(life);
+    const vote: BallotVote = roll < pFor ? "for" : roll < pFor + pNo ? "against" : "abstain";
+    return { name, vote };
+  });
+}
+
+function countVotes(votes: DirectorBallot[]): { yes: number; no: number; abstain: number } {
+  let yes = 0;
+  let no = 0;
+  let abstain = 0;
+  for (const vote of votes) {
+    if (vote.vote === "for") yes += 1;
+    else if (vote.vote === "against") no += 1;
+    else abstain += 1;
   }
-  if (dims.achieve < 40 && dims.spirit < 40) {
-    lines.push("成就和精神都薄，會想衝破現在的形狀，不一定靠董事局。");
+  return { yes, no, abstain };
+}
+
+function passedBar(yes: number, total: number, bar: BallotBar): boolean {
+  if (bar === "half") return yes * 2 > total;
+  return yes * 3 >= total * 2;
+}
+
+function makeResolution(
+  life: Life,
+  names: string[],
+  lean: number,
+  spec: Omit<Resolution, "votes" | "yes" | "no" | "abstain" | "passed">,
+): Resolution {
+  const votes = rollVotes(life, names, lean);
+  const counts = countVotes(votes);
+  return {
+    ...spec,
+    votes,
+    yes: counts.yes,
+    no: counts.no,
+    abstain: counts.abstain,
+    passed: passedBar(counts.yes, votes.length, spec.bar),
+  };
+}
+
+function tallyLine(item: Resolution): string {
+  return `贊成 ${item.yes}，反對 ${item.no}，棄權 ${item.abstain}`;
+}
+
+function conveneBoard(life: Life): BoardMeeting {
+  const taken = new Set<string>([life.name]);
+  const directors = boardNames(life, 9, taken);
+  for (const name of directors) taken.add(name);
+  const candidate = boardNames(life, 1, taken)[0] ?? "新董事";
+  const year = life.plan?.year ?? life.birthYear + life.age;
+  const items: Resolution[] = [];
+  const seat = makeResolution(life, directors, 0.5, {
+    id: "seat",
+    kind: "seat",
+    title: "董事委任",
+    detail: `表決是否委任${candidate}。過半數通過。`,
+    bar: "half",
+  });
+  items.push(seat);
+  if (seat.passed) life.social = clamp(life.social + 1, 0, 100);
+  noteLife(
+    life,
+    "董事委任",
+    seat.passed
+      ? `${candidate}的委任過了半數。${tallyLine(seat)}。`
+      : `${candidate}的委任沒有過半數。${tallyLine(seat)}。`,
+  );
+
+  const wantMerger = draw(life) < 0.42;
+  const wantCharter = draw(life) < 0.7 || !wantMerger;
+  if (wantCharter) {
+    const charters = [
+      {
+        id: "disclose",
+        title: "章程：關聯交易要披露",
+        pass: () => {
+          life.reputation = clamp(life.reputation + 4, 0, 100);
+          movePrice(life, 0.02, 0);
+        },
+        passLine: "章程以三分之二通過。關聯交易要披露，股東對這份規矩多了一點信心。",
+        failLine: "章程沒有到三分之二，維持原樣。",
+      },
+      {
+        id: "watch",
+        title: "章程：業績須經董事過目",
+        pass: () => {
+          life.booksWatch = true;
+          life.reputation = clamp(life.reputation + 3, 0, 100);
+        },
+        passLine: "章程以三分之二通過。往後業績要經董事過目，改數字更容易被看見。",
+        failLine: "章程沒有到三分之二，業績仍不必先過目。",
+      },
+      {
+        id: "purse",
+        title: "章程：放寬主席可動用的額度",
+        pass: () => {
+          life.leverage = clamp(life.leverage + 0.05, 0, 0.94);
+          life.reputation = clamp(life.reputation - 3, 0, 100);
+          movePrice(life, -0.015, 0);
+        },
+        passLine: "章程以三分之二通過。主席能動用的額度變大，股東信心卻緊了一點。",
+        failLine: "章程沒有到三分之二，額度維持原樣。",
+      },
+    ] as const;
+    const charter = charters[Math.floor(draw(life) * charters.length)]!;
+    const item = makeResolution(life, directors, 0.36, {
+      id: charter.id,
+      kind: "charter",
+      title: charter.title,
+      detail: "非常規表決。三分之二以上通過。",
+      bar: "twoThirds",
+    });
+    items.push(item);
+    if (item.passed) charter.pass();
+    noteLife(life, "章程", `${item.passed ? charter.passLine : charter.failLine} ${tallyLine(item)}。`);
   }
-  const fx = countryById(life.countryId).fx;
-  if (outlayScale(life.purse ?? 0, fx) > 1.05) {
-    lines.push("個人資金上升，投入的金額跟著加大。");
+  if (wantMerger) {
+    const item = makeResolution(life, directors, 0.32, {
+      id: "merger",
+      kind: "merger",
+      title: "合併",
+      detail: "把公司跟另一盤生意合成一盤。非常規表決，三分之二以上通過。",
+      bar: "twoThirds",
+    });
+    items.push(item);
+    if (item.passed) movePrice(life, (draw(life) - 0.42) * 0.18, 0.12);
+    noteLife(
+      life,
+      "合併",
+      item.passed
+        ? `合併以三分之二通過。兩盤生意合成一盤，流通股變多。${tallyLine(item)}。`
+        : `合併沒有到三分之二，沒有合成。${tallyLine(item)}。`,
+    );
   }
-  return lines.join("\n");
+  life.log.push({
+    age: life.age,
+    year,
+    title: "董事局",
+    detail: "董事局開會。委任看過半數，章程和合併要三分之二以上。",
+  });
+  return { directors, items };
+}
+
+function chairLean(life: Life): number {
+  const standing = (life.reputation * 0.55 + life.human * 0.45) / 100;
+  let lean = 0.26 + standing * 0.46;
+  if (life.career) lean += 0.04;
+  if (life.flags.office) lean += 0.05;
+  if ((life.debt ?? 0) > 0) lean -= 0.06;
+  return clamp(lean, 0.16, 0.74);
 }
 
 export function beginYear(life: Life): Life {
@@ -406,9 +568,11 @@ export function beginYear(life: Life): Life {
     choiceSlots: rollChoiceSlots(next),
     recent: [],
     explanation: "",
-    portrait: boardPortrait(next),
-    reviewSeen: false,
   };
+  if (next.age >= 5 && next.age % 5 === 0) {
+    next.plan.meeting = conveneBoard(next);
+    next.plan.meetingSeen = false;
+  }
   return next;
 }
 
@@ -1560,6 +1724,80 @@ export function takeChair(source: Life): Life {
     "主席",
     `${debtLine(ccy, bill.paid, bill.borrowed, life.debt ?? 0, "買回股票，出任主席。之後的主席薪酬入個人資金")}。`,
   );
+  return life;
+}
+
+export function standForChair(source: Life): Life {
+  const meeting = source.plan?.meeting;
+  if (!source.alive || !source.plan || !meeting || source.chairman || source.age < 18 || meeting.chair) return source;
+  const life = copy(source);
+  const names = life.plan?.meeting?.directors ?? [];
+  if (names.length === 0 || !life.plan?.meeting) return source;
+  const item = makeResolution(life, names, chairLean(life), {
+    id: "chair",
+    kind: "chair",
+    title: "委任主席",
+    detail: "由你出任董事局主席。過半數通過。",
+    bar: "half",
+  });
+  const nextMeeting = life.plan.meeting;
+  nextMeeting.chair = item;
+  const ccy = countryById(life.countryId).ccy;
+  const tally = tallyLine(item);
+  if (!item.passed) {
+    const note = `主席表決沒有過半數。${tally}。沒有就任。`;
+    nextMeeting.chairNote = note;
+    noteLife(life, "主席", note);
+    return life;
+  }
+  const cost = chairCost(life);
+  if (!canCover(life, cost)) {
+    const note = `主席表決過了半數。${tally}。買回股票要 ${formatMoney(cost)} ${ccy}，超過負債上限，沒有就任。`;
+    nextMeeting.chairNote = note;
+    noteLife(life, "主席", note);
+    return life;
+  }
+  const satBefore = satisfaction(life);
+  const bill = charge(life, cost);
+  life.chairman = true;
+  const cap = Math.max(life.price * life.shares, 1);
+  const fraction = Math.min(0.2, cost / cap);
+  life.shares = Math.max(1, life.shares * (1 - fraction));
+  life.reputation = clamp(life.reputation + 3, 0, 100);
+  life.mind = clamp(life.mind - 1, 0, 100);
+  const drift = priceFromSatisfaction(satBefore, satisfaction(life));
+  if (drift !== 0) movePrice(life, drift, 0);
+  const note = `${debtLine(ccy, bill.paid, bill.borrowed, life.debt ?? 0, `主席表決過了半數。${tally}。買回股票，出任主席`)}。之後的主席薪酬入個人資金。`;
+  nextMeeting.chairNote = note;
+  noteLife(life, "主席", note);
+  return life;
+}
+
+export function alterBooks(source: Life, mode: "up" | "down"): Life {
+  if (!source.alive || !source.plan || !source.chairman) return source;
+  const year = source.plan.year;
+  if ((source.booksYear ?? 0) === year) return source;
+  const life = copy(source);
+  life.booksYear = year;
+  const caught = draw(life) < (mode === "up" ? (life.booksWatch ? 0.62 : 0.4) : 0.22);
+  if (mode === "up" && caught) {
+    life.reputation = clamp(life.reputation - 12, 0, 100);
+    life.mind = clamp(life.mind - 3, 0, 100);
+    movePrice(life, -0.1, 0);
+    noteLife(life, "業績", "業績被寫高。股東對上了，信心退了。");
+  } else if (mode === "up") {
+    life.reputation = clamp(life.reputation + 1, 0, 100);
+    movePrice(life, 0.055, 0);
+    noteLife(life, "業績", "業績被寫高。這一陣還沒有人質疑。");
+  } else if (caught) {
+    life.reputation = clamp(life.reputation - 5, 0, 100);
+    movePrice(life, -0.04, 0);
+    noteLife(life, "業績", "業績被寫低。有股東覺得數字不老實，信心退了。");
+  } else {
+    life.reputation = clamp(life.reputation + 2, 0, 100);
+    movePrice(life, -0.02, 0);
+    noteLife(life, "業績", "業績被寫低。股價沉了一點，質疑不多。");
+  }
   return life;
 }
 

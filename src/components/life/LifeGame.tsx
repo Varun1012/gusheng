@@ -33,7 +33,8 @@ import {
   sellHome,
   setPolicy,
   spend,
-  takeChair,
+  standForChair,
+  alterBooks,
   quotedHome,
 } from "@/game/engine";
 import {
@@ -67,7 +68,7 @@ import { POLICIES, type Policy } from "@/game/policies";
 import { REGIME_NAME, cycleBlurb } from "@/game/regimes";
 import { policyMood, SPENDS, investChance, outlayScale, spendCost, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
-import type { BirthInput, HistPoint, Life, PolicyId, Report } from "@/game/types";
+import type { BallotVote, BirthInput, HistPoint, Life, PolicyId, Report, Resolution } from "@/game/types";
 import type { Dimensions } from "@/game/engine";
 
 declare global {
@@ -330,6 +331,7 @@ export function LifeGame() {
 
   function finishYear() {
     if (!life?.alive || !life.plan) return;
+    if (life.plan.meetingSeen === false) return;
     if (life.plan.eventId && !life.plan.committed) return;
     const step = choose(life, null);
     if (step.report) settle(step.life, step.report);
@@ -341,7 +343,7 @@ export function LifeGame() {
 
   useEffect(() => {
     if (!ready || phase !== "play" || !quoting || !life?.alive || !life.plan) return;
-    if (life.plan.reviewSeen === false) return;
+    if (life.plan.meetingSeen === false) return;
     if (life.plan.eventId && !life.plan.committed) return;
     const timer = window.setTimeout(() => {
       const step = advance(life);
@@ -470,9 +472,9 @@ export function LifeGame() {
               setLife(next);
               if (music.sfx) blip(next.price >= before);
             }}
-            onChair={() => {
+            onBooks={(mode) => {
               const before = life.price;
-              const next = takeChair(life);
+              const next = alterBooks(life, mode);
               if (next === life) return;
               setLife(next);
               if (music.sfx) blip(next.price >= before);
@@ -517,25 +519,64 @@ export function LifeGame() {
         {phase === "play" && life?.plan?.eventId && !life.plan.committed && (
           <ChoiceDialog life={life} onChoose={act} />
         )}
-        {phase === "play" && life?.plan?.reviewSeen === false && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4 py-6">
-            <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-gold/50 bg-panel p-6">
-              <p className="text-xs text-gold">董事局 · {life.plan.year}年 · {life.age}歲</p>
-              <h2 className="mt-1 font-serif text-3xl text-ivory">這一年的潛力和特質</h2>
-              <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-ivory">
-                {life.plan.portrait || "股價衡量這一生走到哪。"}
-              </p>
-              <button
-                type="button"
-                autoFocus
-                onClick={() => {
-                  if (!life.plan) return;
-                  setLife({ ...life, plan: { ...life.plan, reviewSeen: true } });
-                }}
-                className="mt-5 min-h-11 w-full rounded-xl bg-gold px-4 py-3 font-medium text-ink"
-              >
-                繼續
-              </button>
+        {phase === "play" && life?.plan?.meeting && life.plan.meetingSeen === false && (
+          <div
+            className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4 py-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="board-vote-title"
+          >
+            <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gold/50 bg-panel">
+              <div className="overflow-auto px-5 py-5 sm:px-6">
+                <p className="text-xs text-gold">
+                  董事局 · 每五年 · {life.plan.year}年 · {life.age}歲
+                </p>
+                <h2 id="board-vote-title" className="mt-1 font-serif text-3xl text-ivory">
+                  表決
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted">
+                  董事委任過半數通過。章程和合併是非常規表決，要三分之二以上。
+                </p>
+                {life.plan.meeting.items.map((item) => (
+                  <VoteBlock key={item.id} item={item} />
+                ))}
+                <div className="mt-5 border-t border-line pt-4">
+                  <p className="text-xs text-gold">主席</p>
+                  {life.plan.meeting.chair ? (
+                    <VoteBlock item={life.plan.meeting.chair} />
+                  ) : life.chairman ? (
+                    <p className="mt-2 text-sm text-ivory">你已是主席。會後可以監督業績，也可以改數字。</p>
+                  ) : life.age < 18 ? (
+                    <p className="mt-2 text-sm text-muted">未滿十八，不能爭主席。</p>
+                  ) : (
+                    <ChairStand
+                      life={life}
+                      onStand={() => {
+                        const before = life.price;
+                        const next = standForChair(life);
+                        if (next === life) return;
+                        setLife(next);
+                        if (music.sfx) blip(next.price >= before);
+                      }}
+                    />
+                  )}
+                  {life.plan.meeting.chairNote ? (
+                    <p className="mt-3 text-sm leading-relaxed text-ivory">{life.plan.meeting.chairNote}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="shrink-0 border-t border-line px-5 py-4 sm:px-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!life.plan) return;
+                    setLife({ ...life, plan: { ...life.plan, meetingSeen: true } });
+                  }}
+                  className="min-h-11 w-full rounded-xl bg-gold px-4 py-3 font-medium text-ink"
+                >
+                  繼續
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -663,6 +704,61 @@ function Person({ id, className }: { id: string; className?: string }) {
       draggable={false}
       className={"pixel object-contain " + (className ?? "h-40 w-24")}
     />
+  );
+}
+
+function voteWord(vote: BallotVote): string {
+  if (vote === "for") return "贊成";
+  if (vote === "against") return "反對";
+  return "棄權";
+}
+
+function VoteBlock({ item }: { item: Resolution }) {
+  const bar = item.bar === "twoThirds" ? "三分之二" : "過半數";
+  return (
+    <div className="mt-4">
+      <p className="font-medium text-ivory">{item.title}</p>
+      <p className="mt-1 text-sm text-muted">{item.detail}</p>
+      <p className="mt-2 font-mono text-sm text-ivory">
+        贊成 {item.yes} · 反對 {item.no} · 棄權 {item.abstain}
+      </p>
+      <p className={"text-sm " + (item.passed ? "text-gold" : "text-muted")}>
+        {item.passed ? `已到${bar}，通過` : `未到${bar}，沒有通過`}
+      </p>
+      <ul className="mt-2 max-h-36 space-y-1 overflow-auto pr-1">
+        {item.votes.map((vote) => (
+          <li key={vote.name} className="flex items-baseline justify-between gap-3 text-sm">
+            <span className="min-w-0 flex-1">{vote.name}</span>
+            <span className="shrink-0 text-muted">{voteWord(vote.vote)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ChairStand({ life, onStand }: { life: Life; onStand: () => void }) {
+  const market = countryById(life.countryId);
+  const cost = chairCost(life);
+  const over = life.purse + debtRoom(life) + 0.5 < cost;
+  const short = !over && life.purse + 0.5 < cost;
+  return (
+    <button
+      type="button"
+      disabled={over}
+      onClick={onStand}
+      className={
+        "mt-3 min-h-11 w-full rounded-xl border px-4 py-3 text-left text-sm " +
+        (over ? "cursor-not-allowed border-line opacity-40" : "border-gold bg-gold/15 text-ivory")
+      }
+    >
+      <span className="block font-medium">按規程爭取主席</span>
+      <span className="mt-1 block text-xs text-muted">
+        {over
+          ? `買回股票要 ${formatMoney(cost)} ${market.ccy} · 超過負債上限`
+          : `通過後扣 ${formatMoney(cost)} ${market.ccy}${short ? " · 不夠記成負債" : ""}`}
+      </span>
+    </button>
   );
 }
 
@@ -794,7 +890,7 @@ function Title({
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
             <li>三十個上市地，按粗出生率加權。不是按人口。</li>
-            <li>每年開市，董事局會點一次這個人的潛力和特質。股價衡量這一生走到哪。</li>
+            <li>每五年董事局開一次會。董事委任要過半數。章程和合併要三分之二以上。可以看每位董事投贊成、反對還是棄權。</li>
             <li>路上不只有職位。興趣、心裡的難題、外面的人和規矩，也會把人問住。</li>
             <li>身體會帶上具體的病。不理會，會一年年抽走。</li>
             <li>個人資金變厚，興趣、工作和要投入的金額跟著加大。房子和薪酬不跟著加。</li>
@@ -805,7 +901,7 @@ function Title({
             <li>重大抉擇一年一兩次，也可以一次都沒有。選項不限兩項，也不分對錯。視窗會直接彈出。選完看四個向度怎麼動。合起來往上，聲音是一種；沒有往上，是另一種。</li>
             <li>題目跟著已經走上的仕途往下問，同一件事不會再問。路可以在中途換。</li>
             <li>興趣有十二門。同時只專注一門，但可以換。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
-            <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
+            <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席要先在董事局過半數，再買回股票，薪酬才入個人資金。就任後可以改業績，有機會傷到股東信心。</li>
             <li>負債年利率一成。不夠的差額記成負債，最多一萬美元。滾到五萬美元，這一世結束。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
           </ul>
@@ -964,16 +1060,16 @@ function SpendColumn({
   life,
   fx,
   onSpend,
-  onChair,
   onBuyHome,
   onSellHome,
+  onBooks,
 }: {
   life: Life;
   fx: number;
   onSpend: (id: string) => void;
-  onChair: () => void;
   onBuyHome: (mode: "cash" | "mortgage") => void;
   onSellHome: () => void;
+  onBooks: (mode: "up" | "down") => void;
 }) {
   const hobbies = SPENDS.filter((item) => item.group === "hobby" && spendVisible(item, life.age));
   const jobs = SPENDS.filter((item) => item.group === "work" && spendVisible(item, life.age));
@@ -986,7 +1082,6 @@ function SpendColumn({
   const equity = Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0));
   const year = life.plan?.year ?? life.birthYear + life.age;
   const traded = (life.houseYear ?? 0) === year;
-  const chair = life.age >= 18 ? chairCost(life) : 0;
   return (
     <div className="rounded-2xl border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1073,18 +1168,26 @@ function SpendColumn({
           <p className="text-xs text-muted">主席</p>
           <div className="mt-2">
             {life.chairman ? (
-              <p className="text-sm text-ivory">你是主席。薪酬 {formatMoney(life.salary)} {ccy} 入個人資金。</p>
+              <>
+                <p className="text-sm text-ivory">你是主席。薪酬 {formatMoney(life.salary)} {ccy} 入個人資金。</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted">可以監督業績。改數字有機會傷到股東信心。</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <HouseButton
+                    label="把業績寫高"
+                    sub={(life.booksYear ?? 0) === year ? "今年已改過" : "改高對外的數字"}
+                    disabled={(life.booksYear ?? 0) === year}
+                    onClick={() => onBooks("up")}
+                  />
+                  <HouseButton
+                    label="把業績寫低"
+                    sub={(life.booksYear ?? 0) === year ? "今年已改過" : "改低對外的數字"}
+                    disabled={(life.booksYear ?? 0) === year}
+                    onClick={() => onBooks("down")}
+                  />
+                </div>
+              </>
             ) : (
-              <HouseButton
-                label="買回股票，出任主席"
-                sub={
-                  life.purse + debtRoom(life) + 0.5 < chair
-                    ? `扣 ${formatMoney(chair)} ${ccy} · 超過負債上限`
-                    : `扣 ${formatMoney(chair)} ${ccy}${life.purse + 0.5 < chair ? " · 不夠記成負債" : ""}`
-                }
-                disabled={false}
-                onClick={onChair}
-              />
+              <p className="text-sm text-muted">主席要等五年一次的董事局。表決過半數，再買回股票，才可以就任。</p>
             )}
           </div>
         </div>
@@ -1252,9 +1355,9 @@ function Play({
   onToggleLog,
   onPolicy,
   onSpend,
-  onChair,
   onBuyHome,
   onSellHome,
+  onBooks,
   quoting,
   onToggleQuote,
   onFinishYear,
@@ -1265,9 +1368,9 @@ function Play({
   onToggleLog: () => void;
   onPolicy: (id: PolicyId) => void;
   onSpend: (id: string) => void;
-  onChair: () => void;
   onBuyHome: (mode: "cash" | "mortgage") => void;
   onSellHome: () => void;
+  onBooks: (mode: "up" | "down") => void;
   quoting: boolean;
   onToggleQuote: () => void;
   onFinishYear: () => void;
@@ -1387,9 +1490,9 @@ function Play({
         life={life}
         fx={market.fx}
         onSpend={onSpend}
-        onChair={onChair}
         onBuyHome={onBuyHome}
         onSellHome={onSellHome}
+        onBooks={onBooks}
       />
 
       {event ? (
