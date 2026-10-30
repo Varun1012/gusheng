@@ -37,6 +37,8 @@ export interface ChoiceDef {
   sideUsd?: number;
   /** Run for office. Success takes the seat. A funded loss gives it up. */
   seekOffice?: boolean;
+  /** Mark the current ailment as tended, or let it worsen. */
+  ailment?: "manage" | "worsen";
   hazard?: number;
   cause?: string;
   relist?: string | "safer" | "richer";
@@ -69,6 +71,8 @@ export interface GameEvent {
   gate?: boolean;
   /** Follows a road already taken. Asked once, in order, and preferred over loose questions. */
   thread?: boolean;
+  /** Comes ahead of ordinary path questions. The body or the mind is already in trouble. */
+  urgent?: boolean;
   /** A sharp economic print. Flavor may recall a real episode; the year does not. */
   shock?: boolean;
   /** Immediate price gap before the choice tilts it. Negative is a hit. */

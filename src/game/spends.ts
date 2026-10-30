@@ -10,6 +10,12 @@ export type SpendId =
   | "meal"
   | "walk"
   | "park"
+  | "write"
+  | "cook"
+  | "photo"
+  | "garden"
+  | "chess"
+  | "make"
   | "gig"
   | "craft"
   | "night"
@@ -60,6 +66,12 @@ export const SPENDS: SpendDef[] = [
   { id: "music", group: "hobby", label: "學樂器", minAge: 6, usd: 48, base: bars(4, 0, 0, 2, 2, 0) },
   { id: "read", group: "hobby", label: "買書", minAge: 6, usd: 22, base: bars(4, 0, 0, 1, 3, 0) },
   { id: "meal", group: "hobby", label: "請家人吃飯", minAge: 6, usd: 36, base: bars(2, 1, 5, 0, 0, 0) },
+  { id: "write", group: "hobby", label: "寫字", minAge: 8, usd: 12, base: bars(4, 0, 0, 0, 3, 1) },
+  { id: "cook", group: "hobby", label: "下廚", minAge: 8, usd: 28, base: bars(2, 1, 4, 1, 1, 0) },
+  { id: "photo", group: "hobby", label: "拍照", minAge: 10, usd: 40, base: bars(2, 0, 0, 3, 1, 2) },
+  { id: "garden", group: "hobby", label: "園藝", minAge: 8, usd: 18, base: bars(3, 2, 1, 1, 0, 0) },
+  { id: "chess", group: "hobby", label: "下棋", minAge: 8, usd: 16, base: bars(3, 0, 0, 2, 3, 0) },
+  { id: "make", group: "hobby", label: "手工", minAge: 8, usd: 26, base: bars(2, 0, 1, 0, 3, 1) },
   {
     id: "gig",
     group: "work",
@@ -153,6 +165,18 @@ export const SPENDS: SpendDef[] = [
 
 export function spendById(id: string): SpendDef | undefined {
   return SPENDS.find((item) => item.id === id);
+}
+
+/** Personal funds thicken the stake. Houses, wages and cash-ins do not use this. */
+export function outlayScale(purse: number, fx: number): number {
+  const usd = fx > 0 ? Math.max(0, purse) / fx : 0;
+  if (usd < 2500) return 1;
+  return Math.min(5, 1 + Math.log2(usd / 2500) * 0.5);
+}
+
+export function spendCost(item: SpendDef, purse: number, fx: number): number {
+  if (item.usd <= 0) return 0;
+  return item.usd * outlayScale(purse, fx) * fx;
 }
 
 export function spendCellKey(life: {
@@ -282,10 +306,12 @@ function grind(id: SpendId): boolean {
 export function resolveDelta(policy: PolicyId, spend: SpendDef): StatDelta {
   const delta = { ...spend.base };
   const extra = bars(0, 0, 0, 0, 0, 0);
-  const study = spend.id === "read" || spend.id === "craft";
-  const body = spend.id === "sport" || spend.id === "walk" || spend.id === "ease";
-  const home = spend.id === "meal" || spend.id === "ease";
-  const people = spend.id === "park" || spend.id === "music" || spend.id === "walk";
+  const study =
+    spend.id === "read" || spend.id === "craft" || spend.id === "write" || spend.id === "chess" || spend.id === "make";
+  const body = spend.id === "sport" || spend.id === "walk" || spend.id === "ease" || spend.id === "garden";
+  const home = spend.id === "meal" || spend.id === "ease" || spend.id === "cook";
+  const people =
+    spend.id === "park" || spend.id === "music" || spend.id === "walk" || spend.id === "photo" || spend.id === "garden";
   const ventureWork = spend.id === "stall" || spend.id === "craft";
 
   if (policy === "health") {

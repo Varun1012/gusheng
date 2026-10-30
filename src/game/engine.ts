@@ -1,6 +1,6 @@
 import { TIER_ORDER, countryById, pickCountryByBirth } from "@/game/countries";
 import { eventById, EVENTS } from "@/game/events";
-import { capUsd, formatMoney, priceUsd } from "@/game/format";
+import { capUsd, formatMoney, formatMultiple, priceMultiple, priceUsd } from "@/game/format";
 import { ageHousehold, attachChild, attachSpouse, partSpouse, seedHousehold } from "@/game/household";
 import { mortalityQx, naturalCause } from "@/game/mortality";
 import { childName, familyLine, personName, reticker, tickerOf } from "@/game/names";
@@ -11,13 +11,16 @@ import {
   policyNudge,
   policyShiftLine,
   invertDelta,
+  outlayScale,
   resolveDelta,
   spendById,
   spendCellKey,
+  spendCost,
 } from "@/game/spends";
 import { REGIME_DRIFT, REGIME_SCALAR, syncCycle } from "@/game/regimes";
+import { CAREER_LABEL } from "@/game/career-events";
 import type { ChoiceDef } from "@/game/event-types";
-import type { BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId, YearPlan } from "@/game/types";
+import type { Ailment, BirthInput, Exposure, Life, PolicyId, RegimeId, Report, Stage, TierId } from "@/game/types";
 
 const TIER_STATS: Record<
   TierId,
@@ -91,6 +94,7 @@ function copy(life: Life): Life {
         }
       : null,
     cool: { ...(life.cool ?? {}) },
+    ailment: life.ailment ? { ...life.ailment } : life.ailment,
   };
 }
 
@@ -105,7 +109,9 @@ function fill(template: string, life: Life, regimeName: string, headline: string
     .replaceAll("{regime}", regimeName)
     .replaceAll("{headline}", headline)
     .replaceAll("{name}", life.name)
-    .replaceAll("{ccy}", c.ccy);
+    .replaceAll("{ccy}", c.ccy)
+    .replaceAll("{ailment}", life.ailment?.name ?? "身上的病")
+    .replaceAll("{hobby}", life.hobby ? (spendById(life.hobby)?.label ?? "這門興趣") : "這門興趣");
 }
 
 function eligible(event: (typeof EVENTS)[number], life: Life, regimeId: RegimeId): boolean {
@@ -300,9 +306,10 @@ function pickSlotEvent(life: Life): string | null {
   if (pool.length === 0) return null;
   const gates = pool.filter((event) => event.gate).sort((a, b) => (a.minAge ?? 0) - (b.minAge ?? 0));
   if (gates.length > 0) return gates[0]!.id;
+  const urgent = pool.filter((event) => event.urgent);
   const anchors = pool.filter((event) => event.anchorAge === life.age);
   const threads = pool.filter((event) => event.thread);
-  const use = anchors.length > 0 ? anchors : threads.length > 0 ? threads : pool;
+  const use = urgent.length > 0 ? urgent : anchors.length > 0 ? anchors : threads.length > 0 ? threads : pool;
   const weights = use.map((event) => ({ event, weight: tunedWeight(event, life) }));
   const total = weights.reduce((sum, item) => sum + item.weight, 0);
   let roll = draw(life) * total;
@@ -313,10 +320,69 @@ function pickSlotEvent(life: Life): string | null {
   return weights[weights.length - 1]!.event.id;
 }
 
+const AILMENTS: { id: string; name: string }[] = [
+  { id: "bp", name: "高血壓" },
+  { id: "sugar", name: "糖尿病" },
+  { id: "asthma", name: "哮喘" },
+  { id: "mood", name: "情緒病" },
+  { id: "joint", name: "關節病" },
+  { id: "gut", name: "腸胃病" },
+  { id: "heart", name: "心臟病" },
+  { id: "fatigue", name: "長期疲勞" },
+];
+
+function maybeContract(life: Life) {
+  if (life.ailment || life.age < 12) return;
+  const frail = life.health < 46 || life.mind < 36;
+  const older = life.age >= 52;
+  if (!frail && !older) return;
+  if (draw(life) >= (frail ? 0.28 : 0.12)) return;
+  const picked = AILMENTS[Math.floor(draw(life) * AILMENTS.length)]!;
+  const ailment: Ailment = { id: picked.id, name: picked.name, since: life.age, managed: false };
+  life.ailment = ailment;
+}
+
+function boardPortrait(life: Life): string {
+  const dims = dimensions(life);
+  const ranked = [
+    ["生理", dims.body],
+    ["心理", dims.mind],
+    ["成就", dims.achieve],
+    ["精神", dims.spirit],
+  ] as const;
+  const order = [...ranked].sort((a, b) => b[1] - a[1]);
+  const thick = order[0]![0];
+  const thin = order[order.length - 1]![0];
+  const career = life.career ? (CAREER_LABEL[life.career] ?? life.career) : "";
+  const hobby = life.hobby ? spendById(life.hobby)?.label : "";
+  const lines = [
+    `股價衡量這一生走到哪。自上市 ${formatMultiple(priceMultiple(life))}。`,
+    `生理 ${Math.round(dims.body)}，心理 ${Math.round(dims.mind)}，成就 ${Math.round(dims.achieve)}，精神 ${Math.round(dims.spirit)}。`,
+    `潛力最厚的是${thick}。特質裡最薄的是${thin}。`,
+    career ? `仕途在${career}。路也可以在職位之外。` : "還沒有職位。路可以在職位之外。",
+  ];
+  if (hobby) lines.push(`正在專注${hobby}。`);
+  if (life.ailment) {
+    lines.push(`身上帶著${life.ailment.name}${life.ailment.managed ? "，正在照料" : "，還沒好好照料"}。`);
+  }
+  if (dims.body < 40 && dims.mind < 40) {
+    lines.push("生心理一起低下去，被困住，往後的選擇會更痛。");
+  }
+  if (dims.achieve < 40 && dims.spirit < 40) {
+    lines.push("成就和精神都薄，會想衝破現在的形狀，不一定靠董事局。");
+  }
+  const fx = countryById(life.countryId).fx;
+  if (outlayScale(life.purse ?? 0, fx) > 1.05) {
+    lines.push("個人資金上升，投入的金額跟著加大。");
+  }
+  return lines.join("\n");
+}
+
 export function beginYear(life: Life): Life {
   if (!life.alive) return life;
   const next = copy(life);
   if (next.plan && next.plan.slotMode === "cell" && next.plan.age === next.age) return next;
+  maybeContract(next);
   const year = next.birthYear + next.age;
   const regime = syncCycle(next, () => draw(next));
   const payNote = reviewPay(next);
@@ -340,6 +406,8 @@ export function beginYear(life: Life): Life {
     choiceSlots: rollChoiceSlots(next),
     recent: [],
     explanation: "",
+    portrait: boardPortrait(next),
+    reviewSeen: false,
   };
   return next;
 }
@@ -493,6 +561,16 @@ const HOME_USD: Record<string, number> = {
   mx: 80000,
   ph: 55000,
   eg: 50000,
+  th: 90000,
+  vn: 70000,
+  my: 120000,
+  za: 80000,
+  tr: 90000,
+  es: 180000,
+  se: 220000,
+  pl: 140000,
+  ke: 45000,
+  pk: 40000,
 };
 
 const MAJOR_FIT: Record<string, string[]> = {
@@ -569,7 +647,8 @@ export function choiceMoney(life: Life, choice: ChoiceDef): { cost: number; gain
   if (choice.house === "sell") {
     return { cost: 0, gain: Math.max(0, (life.homeValue ?? 0) - (life.homeDebt ?? 0)) };
   }
-  return { cost: Math.max(0, (choice.spendUsd ?? 0) * fx), gain: Math.max(0, (choice.gainUsd ?? 0) * fx) };
+  const scale = outlayScale(life.purse ?? 0, fx);
+  return { cost: Math.max(0, (choice.spendUsd ?? 0) * scale * fx), gain: Math.max(0, (choice.gainUsd ?? 0) * fx) };
 }
 
 export function chairCost(life: Life): number {
@@ -882,9 +961,9 @@ function applyChoice(life: Life, index: number): Report | null {
   const satBefore = satisfaction(life);
   const fxNow = countryById(life.countryId).fx;
   const buying = (choice.house === "cash" || choice.house === "mortgage") && !life.flags.home;
-  const spendCost = Math.max(0, (choice.spendUsd ?? 0) * fxNow);
+  const scaledSpend = Math.max(0, (choice.spendUsd ?? 0) * outlayScale(life.purse ?? 0, fxNow) * fxNow);
   const houseBill = !buying ? 0 : choice.house === "cash" ? quotedHome(life) : quotedHome(life) * 0.3;
-  const dueNow = Math.max(spendCost, houseBill);
+  const dueNow = Math.max(scaledSpend, houseBill);
   const overCap = dueNow > 0.5 && !canCover(life, dueNow);
   const scalar = REGIME_SCALAR[plan.regimeId][choice.exposure];
   let pricePct = event.shock ? (event.shockBias ?? 0) + choice.price * scalar * 0.32 : choice.price * scalar * 0.45;
@@ -928,12 +1007,16 @@ function applyChoice(life: Life, index: number): Report | null {
     if (choice.setFlags?.children === true) attachChild(life, () => draw(life));
     if (choice.seekOffice) life.flags = { ...life.flags, office: true };
     if (choice.major) life.major = choice.major;
-    if (choice.career) {
+    if (choice.career !== undefined) {
       life.career = choice.career;
-      if (majorFits(life.major, choice.career)) {
+      if (choice.career === "") life.used = life.used.filter((id) => id !== "first_job");
+      if (choice.career && majorFits(life.major, choice.career)) {
         life.mind = clamp(life.mind + 4, 0, 100);
         life.human = clamp(life.human + 3, 0, 100);
       }
+    }
+    if (choice.ailment && life.ailment) {
+      life.ailment = { ...life.ailment, managed: choice.ailment === "manage" };
     }
     if (choice.jobUsd !== undefined) life.job = Math.max(0, choice.jobUsd * fxNow);
   }
@@ -1010,8 +1093,7 @@ function applyChoice(life: Life, index: number): Report | null {
       ),
     );
   } else if (choice.spendUsd && choice.spendUsd > 0) {
-    const cost = choice.spendUsd * fx;
-    const bill = charge(life, cost);
+    const bill = charge(life, scaledSpend);
     money.push(
       debtLine(ccy, bill.paid, bill.borrowed, life.debt ?? 0, choice.seekOffice ? "選舉開支" : undefined),
     );
@@ -1026,7 +1108,9 @@ function applyChoice(life: Life, index: number): Report | null {
         : `個人資金進了 ${formatMoney(gained)} ${ccy}`,
     );
   }
-  if (happens && choice.jobUsd !== undefined && (choice.jobUsd ?? 0) > 0) {
+  if (happens && choice.jobUsd === 0) {
+    money.push("職業收入停了");
+  } else if (happens && choice.jobUsd !== undefined && (choice.jobUsd ?? 0) > 0) {
     money.push(`職業收入每年 ${formatMoney(life.job ?? 0)} ${ccy}，進個人資金`);
   }
   plan.detail = money.length > 0 ? `${choice.label}。${money.join("。")}` : choice.label;
@@ -1118,9 +1202,22 @@ function ageAYear(life: Life): string | null {
   return lines.length > 0 ? lines.join("。") : null;
 }
 
+function ailmentYear(life: Life): string | null {
+  const ailment = life.ailment;
+  if (!ailment) return null;
+  if (ailment.managed) {
+    life.health = clamp(life.health + 1, 0, 100);
+    return `${ailment.name}照著照料，身體回了一點`;
+  }
+  life.health = clamp(life.health - 3, 0, 100);
+  life.mind = clamp(life.mind - 2, 0, 100);
+  return `${ailment.name}沒有好好照料，身體和心情又被抽走`;
+}
+
 function closeYear(life: Life): Report {
   const plan = life.plan!;
   const debtNote = ageAYear(life);
+  const bodyNote = ailmentYear(life);
   const obit = ageHousehold(life, () => draw(life));
   if (obit) {
     life.statusNote = obit;
@@ -1129,6 +1226,10 @@ function closeYear(life: Life): Report {
   if (debtNote && !debtRuined(life)) {
     if (!obit) life.statusNote = debtNote;
     life.log.push({ age: life.age, year: plan.year, title: "負債", detail: debtNote });
+  }
+  if (bodyNote) {
+    if (!obit && !debtNote) life.statusNote = bodyNote;
+    life.log.push({ age: life.age, year: plan.year, title: "身上", detail: bodyNote });
   }
   if (debtRuined(life)) {
     const ccy = countryById(life.countryId).ccy;
@@ -1287,7 +1388,7 @@ export function spend(source: Life, id: string): Life {
   const fx = countryById(source.countryId).fx;
   const ccy = countryById(source.countryId).ccy;
   const free = item.usd <= 0;
-  const cost = item.usd * fx;
+  const cost = spendCost(item, source.purse ?? 0, fx);
   if (!free && !canCover(source, cost)) {
     const refused = copy(source);
     const note = `這筆要 ${formatMoney(cost)} ${ccy}。負債最多只能記成一萬美元，超過了，沒有辦成。`;

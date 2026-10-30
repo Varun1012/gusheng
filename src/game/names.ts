@@ -27,6 +27,16 @@ const IDN = ["Siti Rahmawati", "Budi Santoso", "Dewi Lestari", "Agus Wijaya", "P
 const MX = ["Sofía Hernández", "Diego Ramírez", "Valentina García", "Mateo López", "Camila Torres", "Santiago Cruz"];
 const PH = ["Maria Santos", "Jose Reyes", "Angel Cruz", "Patricia Garcia", "Miguel Flores", "Liza Mendoza"];
 const EG = ["Omar Hassan", "Fatima Ali", "Yusuf Mahmoud", "Nour Ibrahim", "Layla Farouk", "Karim Adel"];
+const TH = ["Somchai Wattana", "Siriporn Chai", "Anong Srisai", "Niran Boonmee", "Malee Phan", "Krit Thongchai"];
+const VN = ["Nguyen Minh Anh", "Tran Gia Huy", "Le Thanh Ha", "Pham Quoc Bao", "Vo Ngoc Lan", "Bui Duc Nam"];
+const MY = ["Aisyah Rahman", "Wei Jun Tan", "Nurul Idris", "Kavitha Nair", "Hafiz Abdullah", "Mei Ling Ong"];
+const ZA = ["Thabo Nkosi", "Amahle Dlamini", "Johan Botha", "Lerato Molefe", "Fatima Peters", "Sipho Khumalo"];
+const TR = ["Elif Yilmaz", "Mehmet Demir", "Zeynep Kaya", "Emre Sahin", "Ayşe Aydin", "Can Ozturk"];
+const ES = ["Lucía García", "Mateo Ruiz", "Sofía Navarro", "Hugo Ortega", "Marta Vidal", "Pablo Serrano"];
+const SE = ["Astrid Lind", "Erik Holm", "Freja Berg", "Noah Ek", "Maja Ström", "Oscar Nyström"];
+const PL = ["Zofia Kowalska", "Jan Nowak", "Hanna Wisniewska", "Piotr Zielinski", "Maja Wójcik", "Adam Kaminski"];
+const KE = ["Amina Otieno", "Brian Mwangi", "Wanjiku Kariuki", "David Kipchoge", "Achieng Oduya", "Faith Wambui"];
+const PK = ["Ayesha Khan", "Hassan Malik", "Fatima Raza", "Omar Sheikh", "Zara Hussain", "Bilal Ahmed"];
 
 export function personName(countryId: string, rng: () => number): string {
   if (countryId === "jp") return pick(rng, JP_SUR) + pick(rng, JP_GIVEN);
@@ -45,6 +55,16 @@ export function personName(countryId: string, rng: () => number): string {
   if (countryId === "mx") return pick(rng, MX);
   if (countryId === "ph") return pick(rng, PH);
   if (countryId === "eg") return pick(rng, EG);
+  if (countryId === "th") return pick(rng, TH);
+  if (countryId === "vn") return pick(rng, VN);
+  if (countryId === "my") return pick(rng, MY);
+  if (countryId === "za") return pick(rng, ZA);
+  if (countryId === "tr") return pick(rng, TR);
+  if (countryId === "es") return pick(rng, ES);
+  if (countryId === "se") return pick(rng, SE);
+  if (countryId === "pl") return pick(rng, PL);
+  if (countryId === "ke") return pick(rng, KE);
+  if (countryId === "pk") return pick(rng, PK);
   return pick(rng, CN_SUR) + pick(rng, CN_GIVEN);
 }
 

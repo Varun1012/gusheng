@@ -65,7 +65,7 @@ import {
 import { tierLabel } from "@/game/names";
 import { POLICIES, type Policy } from "@/game/policies";
 import { REGIME_NAME, cycleBlurb } from "@/game/regimes";
-import { policyMood, SPENDS, investChance, spendOpen, spendVisible, workLabel } from "@/game/spends";
+import { policyMood, SPENDS, investChance, outlayScale, spendCost, spendOpen, spendVisible, workLabel } from "@/game/spends";
 import { loadBoard, loadSnap, pushRecord, saveSnap, type RunRecord, type Snap } from "@/game/save";
 import type { BirthInput, HistPoint, Life, PolicyId, Report } from "@/game/types";
 import type { Dimensions } from "@/game/engine";
@@ -341,6 +341,7 @@ export function LifeGame() {
 
   useEffect(() => {
     if (!ready || phase !== "play" || !quoting || !life?.alive || !life.plan) return;
+    if (life.plan.reviewSeen === false) return;
     if (life.plan.eventId && !life.plan.committed) return;
     const timer = window.setTimeout(() => {
       const step = advance(life);
@@ -516,6 +517,28 @@ export function LifeGame() {
         {phase === "play" && life?.plan?.eventId && !life.plan.committed && (
           <ChoiceDialog life={life} onChoose={act} />
         )}
+        {phase === "play" && life?.plan?.reviewSeen === false && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4 py-6">
+            <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-gold/50 bg-panel p-6">
+              <p className="text-xs text-gold">董事局 · {life.plan.year}年 · {life.age}歲</p>
+              <h2 className="mt-1 font-serif text-3xl text-ivory">這一年的潛力和特質</h2>
+              <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-ivory">
+                {life.plan.portrait || "股價衡量這一生走到哪。"}
+              </p>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  if (!life.plan) return;
+                  setLife({ ...life, plan: { ...life.plan, reviewSeen: true } });
+                }}
+                className="mt-5 min-h-11 w-full rounded-xl bg-gold px-4 py-3 font-medium text-ink"
+              >
+                繼續
+              </button>
+            </div>
+          </div>
+        )}
         {verdict && (
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/80 px-4">
             <div className="max-h-[90vh] w-full max-w-md overflow-auto rounded-2xl border border-line bg-panel p-6">
@@ -675,7 +698,7 @@ function Arrive({ life, onDone }: { life: Life; onDone: () => void }) {
         <p className="text-sm text-gold">投胎</p>
         <h1 className="mt-2 font-serif text-4xl sm:text-5xl">{locked ? shown.name : "戶籍還沒蓋章"}</h1>
         <p className="mt-3 max-w-xl text-sm leading-relaxed text-muted">
-          二十個上市地，按 2024 年粗出生率加權。出生率越高，越容易投到那裡。不是按人口。
+          三十個上市地，按 2024 年粗出生率加權。出生率越高，越容易投到那裡。不是按人口。
         </p>
         <div className="mt-6 flex items-end gap-5">
           <Person id={shown.id} className="h-52 w-32" />
@@ -770,13 +793,18 @@ function Title({
           <Landmark className="size-6 text-gold" aria-hidden="true" />
           <p className="mt-4 font-serif text-xl">招股說明</p>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted">
+            <li>三十個上市地，按粗出生率加權。不是按人口。</li>
+            <li>每年開市，董事局會點一次這個人的潛力和特質。股價衡量這一生走到哪。</li>
+            <li>路上不只有職位。興趣、心裡的難題、外面的人和規矩，也會把人問住。</li>
+            <li>身體會帶上具體的病。不理會，會一年年抽走。</li>
+            <li>個人資金變厚，興趣、工作和要投入的金額跟著加大。房子和薪酬不跟著加。</li>
             <li>出身決定開盤價，國家決定匯率、波動與壽命。</li>
             <li>六種基本政策隨時可換。換一套，四個向度會跟著偏，滿足度也跟著偏。</li>
             <li>滿足度來自生理、心理、成就、精神。股價跟著滿足度走，也跟著這一世自己的市道。市道不照真實年份排。</li>
             <li>家裡的人有名字。配偶若結成、孩子若有了，都會列出來，並寫明在世還是離世。</li>
             <li>重大抉擇一年一兩次，也可以一次都沒有。選項不限兩項，也不分對錯。視窗會直接彈出。選完看四個向度怎麼動。合起來往上，聲音是一種；沒有往上，是另一種。</li>
             <li>題目跟著已經走上的仕途往下問，同一件事不會再問。路可以在中途換。</li>
-            <li>興趣同時只專注一門，但可以換。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
+            <li>興趣有十二門。同時只專注一門，但可以換。走路、投票、去公園不用錢。自己參選要付選舉開支。</li>
             <li>個人資金跟股票分開。職業收入和投資其他公司才進自己口袋，進帳先還負債。主席薪酬要先買回股票。</li>
             <li>負債年利率一成。不夠的差額記成負債，最多一萬美元。滾到五萬美元，這一世結束。</li>
             <li>一年十格，每秒走一格。沒有抉擇就繼續報價。落在哪一格不固定。</li>
@@ -974,6 +1002,7 @@ function SpendColumn({
       </p>
       <p className="mt-1 text-xs leading-relaxed text-muted">
         零工和投資其他公司，每一格一筆。錢不夠會記成負債。負債最多一萬美元，年利率一成。
+        {outlayScale(life.purse ?? 0, fx) > 1.05 ? "個人資金上升，投入的金額跟著加大。" : "個人資金上升之後，投入的金額會跟著加大。"}
       </p>
       {hobbies.length === 0 && jobs.length === 0 && investments.length === 0 ? (
         <p className="mt-4 text-sm text-muted">還小，興趣要再大一點。</p>
@@ -1114,7 +1143,7 @@ function SpendRow({
           const open = spendOpen(item, life, fx);
           const hobbyOn = item.group === "hobby" && life.hobby === item.id;
           const workOn = Boolean(item.work && life.work === item.work);
-          const cost = item.usd * fx;
+          const cost = spendCost(item, life.purse ?? 0, fx);
           const chance = item.invest ? Math.round(investChance(life, item.invest.lean) * 100) : null;
           const over = cost > 0.5 && life.purse + debtRoom(life) + 0.5 < cost;
           const short = !over && cost > 0.5 && life.purse + 0.5 < cost;
@@ -1337,6 +1366,12 @@ function Play({
           <p className="mt-3 text-xs leading-relaxed text-muted">
             滿足度來自這四個向度。股價跟著滿足度走，也跟著這一世自己的市道。
           </p>
+          {life.ailment ? (
+            <p className="mt-2 text-sm text-ivory">
+              身上：{life.ailment.name}
+              {life.ailment.managed ? " · 正在照料" : " · 還沒好好照料"}
+            </p>
+          ) : null}
         </div>
       </div>
 

@@ -120,6 +120,16 @@ export interface YearPlan {
   payNote?: string;
   /** True when the player picked the right option. Not a dice roll. */
   choiceOk?: boolean;
+  /** Board portrait for this year. Shown once. */
+  portrait?: string;
+  reviewSeen?: boolean;
+}
+
+export interface Ailment {
+  id: string;
+  name: string;
+  since: number;
+  managed?: boolean;
 }
 
 export interface BirthInput {
@@ -171,6 +181,8 @@ export interface Life {
   work?: string;
   /** The hobby currently in focus. It can be switched. */
   hobby?: string;
+  /** A named condition, if the body has taken one. */
+  ailment?: Ailment | null;
   /** Calendar year of the focused hobby. */
   hobbyYear?: number;
   /** Owned home value in local currency. 0 if renting. */

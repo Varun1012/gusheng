@@ -1,5 +1,6 @@
 import type { ChoiceDef, GameEvent } from "@/game/event-types";
 import { CAREER_EVENTS } from "@/game/career-events";
+import { LIFE_TURNS } from "@/game/life-turns";
 import { childCount } from "@/game/household";
 import { PERSONAL_EVENTS } from "@/game/personal-events";
 import { SHOCK_EVENTS } from "@/game/shock-events";
@@ -1696,6 +1697,7 @@ export const EVENTS: GameEvent[] = [
   ...SHOCK_EVENTS,
   ...PERSONAL_EVENTS,
   ...CAREER_EVENTS,
+  ...LIFE_TURNS,
 ];
 
 for (const event of EVENTS) {
